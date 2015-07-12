@@ -1,0 +1,7 @@
+[package]
+name = "slabmalloc"
+version = "0.0.1"
+authors = ["Gerd Zellweger <mail@gerdzellweger.com>"]
+
+[dependencies.x86]
+git = "https://github.com/gz/rust-x86"
