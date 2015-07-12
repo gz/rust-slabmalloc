@@ -2,12 +2,12 @@
 name = "slabmalloc"
 version = "0.0.1"
 authors = ["Gerd Zellweger <mail@gerdzellweger.com>"]
-description = "Simple slab based malloc implementation in rust.
-slabmalloc only relies on libcore and is designed for use in kernel level code.
-However using it in user-space is possible as well."
+description = "Simple slab based malloc implementation in rust. slabmalloc only relies on libcore and is designed for use in kernel level code. However using it in user-space is possible as well."
 repository = "https://github.com/gz/rust-slabmalloc"
 readme = "README.md"
+license = "MIT"
+
 keywords = ["os", "malloc", "slab", "alloc"]
 
-[dependencies.x86]
-git = "https://github.com/gz/rust-x86"
+[dependencies]
+x86 = "*"
