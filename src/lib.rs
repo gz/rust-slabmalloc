@@ -1,4 +1,5 @@
 #![feature(no_std, core, raw, core_prelude, core_slice_ext, ptr_as_ref)]
+#![feature(libc)]
 #![no_std]
 
 #![crate_name = "slabmalloc"]
@@ -16,9 +17,12 @@ extern crate x86;
 use x86::paging::{VAddr, CACHE_LINE_SIZE, BASE_PAGE_SIZE};
 
 #[cfg(test)]
+#[macro_use]
 extern crate std;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+extern crate libc;
 
 pub const EMPTY: *mut () = 0x1 as *mut ();
 pub const MAX_SLABS: usize = 9;
@@ -97,7 +101,7 @@ impl ZoneAllocator{
 pub struct SlabAllocator<'a> {
     pub size: usize,
     pager: &'a SlabPageAllocator<'a>,
-    allocateable_elements: usize,
+    pub allocateable_elements: usize,
     allocateable: Option<&'a mut SlabPage<'a>>,
 }
 
@@ -207,6 +211,7 @@ pub struct SlabPageIter<'a> {
 impl<'a> SlabPage<'a> {
 
     fn first_fit(&self, size: usize, alignment: usize) -> Option<(usize, usize)> {
+        assert!(alignment.is_power_of_two());
         for (base_idx, b) in self.meta.bitfield.iter().enumerate() {
             for bit_idx in 0..8 {
                 let idx: usize = base_idx * 8 + bit_idx;
