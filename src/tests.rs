@@ -1,6 +1,8 @@
 use std::prelude::v1::*;
 use std::mem::{transmute};
 use libc;
+use rand;
+use std::mem::size_of;
 
 // The types we want to test:
 use super::{ZoneAllocator, SlabPage, SlabPageMeta, SlabAllocator, SlabPageAllocator};
@@ -44,7 +46,6 @@ impl<'a> SlabPageAllocator<'a> for MmapSlabAllocator {
 
 #[test]
 fn type_size() {
-    use std::mem::size_of;
     assert!(CACHE_LINE_SIZE as usize == size_of::<SlabPageMeta>(),
                "Meta-data within page should not be larger than a single cache-line.");
     assert!(BASE_PAGE_SIZE as usize == size_of::<SlabPage>(),
@@ -64,7 +65,7 @@ fn test_mmap_allocator() {
 }
 
 #[test]
-fn test_slab_allocator() {
+fn test_slab_allocation4096_size8_alignment1() {
     let mmap = MmapSlabAllocator;
     let mut sa: SlabAllocator = SlabAllocator{
         size: 8,
@@ -74,34 +75,37 @@ fn test_slab_allocator() {
     };
     let alignment = 1;
 
-
     let mut objects: Vec<*mut u8> = Vec::new();
-    let mut vec: Vec<&mut usize> = Vec::new();
+    let mut vec: Vec<(usize, &mut [usize; 1])> = Vec::new();
+
     for i in 0..4096 {
         match sa.allocate(alignment) {
             None => panic!("OOM is unlikely."),
             Some(obj) => {
-                unsafe { vec.push(transmute(obj)) };
+                unsafe { vec.push( (rand::random::<usize>(), transmute(obj)) ) };
                 objects.push(obj)
             }
         }
     }
-    let upper: usize = 0xffffffff00000000;
 
+    // Write the objects with a random pattern
     for (idx, item) in vec.iter_mut().enumerate() {
-        **item = idx + upper;
+        let (pattern, ref mut obj) = *item;
+        for i in 0..obj.len() {
+            obj[i] = pattern;
+        }
     }
 
-    // No two allocation point to the same memory:
+    // No two allocations point to the same memory:
     for (idx, item) in vec.iter().enumerate() {
-        assert!( (**item) == (idx + upper));
+        let (pattern, ref obj) = *item;
+        for i in 0..obj.len() {
+            assert!( (obj[i]) == pattern);
+        }
     }
 
-    // Deallocate all the things:
+    // Deallocate all the objects:
     for item in objects.iter_mut() {
         sa.deallocate(*item);
     }
-
-
-    println!("sa.allocateable_elements = {:?}", sa.allocateable_elements);
 }

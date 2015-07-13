@@ -23,6 +23,8 @@ extern crate std;
 mod tests;
 #[cfg(test)]
 extern crate libc;
+#[cfg(test)]
+extern crate rand;
 
 pub const EMPTY: *mut () = 0x1 as *mut ();
 pub const MAX_SLABS: usize = 9;
