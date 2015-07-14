@@ -1,12 +1,24 @@
-#![feature(no_std, core, raw, core_prelude, core_slice_ext, ptr_as_ref)]
-#![feature(libc)]
+#![allow(unused_features, dead_code, unused_variables)]
+
+#![feature(no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
+
 #![no_std]
 
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
 
+
+#[cfg(test)]
+#[macro_use]
+extern crate std;
+
+#[cfg(test)]
+#[prelude_import]
+use std::prelude::v1::*;
+
 #[macro_use]
 extern crate core;
+#[cfg(not(test))]
 use core::prelude::*;
 use core::mem;
 use core::ptr;
@@ -17,14 +29,11 @@ extern crate x86;
 use x86::paging::{VAddr, CACHE_LINE_SIZE, BASE_PAGE_SIZE};
 
 #[cfg(test)]
-#[macro_use]
-extern crate std;
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
 extern crate libc;
 #[cfg(test)]
 extern crate rand;
+#[cfg(test)]
+mod tests;
 
 pub const EMPTY: *mut () = 0x1 as *mut ();
 pub const MAX_SLABS: usize = 9;
@@ -133,7 +142,36 @@ impl<'a> SlabAllocator<'a> {
         None
     }
 
+    #[cfg(not(test))]
+    fn has_slabpage(&mut self, s: &SlabPage<'a>) -> bool {
+        for slab_page in self.allocateable.iter_mut() {
+            if (*slab_page as *const SlabPage) == (s as *const SlabPage) {
+
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    #[cfg(test)]
+    fn has_slabpage(&mut self, s: &SlabPage<'a>) -> bool {
+        match self.allocateable {
+            Some(ref mut list) => {
+                for slab_page in list.iter_mut() {
+                    println!("compare {:?} == {:?}",
+                             (slab_page as *const SlabPage),
+                             (s as *const SlabPage));
+                }
+                false
+            },
+            None => false
+        }
+    }
+
     pub fn allocate<'b>(&'b mut self, alignment: usize) -> Option<*mut u8> {
+        assert!(self.size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
+
         match self.try_allocate(alignment) {
             None => {
                 self.refill_slab(1);
@@ -178,6 +216,7 @@ impl<'a> SlabAllocator<'a> {
         let mut slab_page = unsafe {
             mem::transmute::<VAddr, &'a mut SlabPage>(page)
         };
+        assert!(self.has_slabpage(slab_page));
 
         slab_page.deallocate(ptr, self.size);
     }
@@ -212,16 +251,30 @@ pub struct SlabPageIter<'a> {
 
 impl<'a> SlabPage<'a> {
 
+    pub fn iter_mut(&mut self) -> SlabPageIter<'a> {
+        SlabPageIter {
+            nelem: 2,
+            head: Rawlink::some(self),
+        }
+    }
+
     fn first_fit(&self, size: usize, alignment: usize) -> Option<(usize, usize)> {
         assert!(alignment.is_power_of_two());
         for (base_idx, b) in self.meta.bitfield.iter().enumerate() {
             for bit_idx in 0..8 {
                 let idx: usize = base_idx * 8 + bit_idx;
-                let addr: usize = ((self as *const SlabPage) as usize) + idx * size;
-                //log!("{} {} {:x} {}", idx, b, addr, addr % alignment == 0);
+                let offset = idx * size;
 
+                let offset_iniside_data_area = offset <=
+                    (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE as usize - size);
+                if !offset_iniside_data_area {
+                    return None;
+                }
+
+                let addr: usize = ((self as *const SlabPage) as usize) + offset;
                 let alignment_ok = addr % alignment == 0;
                 let block_is_free = b & (1 << bit_idx) == 0;
+
                 if alignment_ok && block_is_free {
                     return Some((idx, addr));
                 }
@@ -283,11 +336,11 @@ impl<'a> Iterator for SlabPageIter<'a> {
         }
 
         unsafe {
-            self.head.resolve_mut().map(|next| {
+            return self.head.resolve_mut().map(|next| {
                 self.nelem -= 1;
-                //self.head = next.meta.next;
+                self.head = next.meta.next;
                 next
-            })
+            });
         }
     }
 
