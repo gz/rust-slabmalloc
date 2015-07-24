@@ -106,14 +106,14 @@ macro_rules! test_slab_allocation {
             // Make sure we can correctly deallocate:
             let pages_allocated = sa.allocateable.head_elements;
 
-            println!("Deallocate all the objects");
+            //println!("Deallocate all the objects");
             for item in objects.iter_mut() {
                 sa.deallocate(*item);
             }
 
             // then allocate everything again,
             for idx in 0..$allocations {
-                println!("{:?}", idx);
+                //println!("{:?}", idx);
                 match sa.allocate(alignment) {
                     None => panic!("OOM is unlikely."),
                     Some(obj) => {
@@ -139,19 +139,19 @@ macro_rules! test_slab_allocation_panic {
 }
 
 test_slab_allocation!(test_slab_allocation8192_size8_alignment1, 8, 1, 512);
-//test_slab_allocation!(test_slab_allocation4096_size8_alignment8, 8, 8, 4096);
-//test_slab_allocation!(test_slab_allocation500_size8_alignment64, 8, 64, 500);
-//test_slab_allocation!(test_slab_allocation4096_size12_alignment1, 12, 1, 4096);
-//test_slab_allocation!(test_slab_allocation4096_size13_alignment1, 13, 1, 4096);
-//test_slab_allocation!(test_slab_allocation2000_size14_alignment1, 14, 1, 2000);
-//test_slab_allocation!(test_slab_allocation4096_size15_alignment1, 15, 1, 4096);
-//test_slab_allocation!(test_slab_allocation8000_size16_alignment1, 16, 1, 8000);
-//test_slab_allocation!(test_slab_allocation1024_size24_alignment1, 24, 1, 1024);
-//test_slab_allocation!(test_slab_allocation3090_size32_alignment1, 32, 1, 3090);
-//test_slab_allocation!(test_slab_allocation4096_size64_alignment1, 64, 1, 4096);
-//test_slab_allocation!(test_slab_allocation1000_size512_alignment1, 512, 1, 1000);
-//test_slab_allocation!(test_slab_allocation4096_size1024_alignment1, 1024, 1, 4096);
-//test_slab_allocation!(test_slab_allocation10_size2048_alignment1, 2048, 1, 10);
+test_slab_allocation!(test_slab_allocation4096_size8_alignment8, 8, 8, 4096);
+test_slab_allocation!(test_slab_allocation500_size8_alignment64, 8, 64, 500);
+test_slab_allocation!(test_slab_allocation4096_size12_alignment1, 12, 1, 4096);
+test_slab_allocation!(test_slab_allocation4096_size13_alignment1, 13, 1, 4096);
+test_slab_allocation!(test_slab_allocation2000_size14_alignment1, 14, 1, 2000);
+test_slab_allocation!(test_slab_allocation4096_size15_alignment1, 15, 1, 4096);
+test_slab_allocation!(test_slab_allocation8000_size16_alignment1, 16, 1, 8000);
+test_slab_allocation!(test_slab_allocation1024_size24_alignment1, 24, 1, 1024);
+test_slab_allocation!(test_slab_allocation3090_size32_alignment1, 32, 1, 3090);
+test_slab_allocation!(test_slab_allocation4096_size64_alignment1, 64, 1, 4096);
+test_slab_allocation!(test_slab_allocation1000_size512_alignment1, 512, 1, 1000);
+test_slab_allocation!(test_slab_allocation4096_size1024_alignment1, 1024, 1, 4096);
+test_slab_allocation!(test_slab_allocation10_size2048_alignment1, 2048, 1, 10);
 
 #[test]
 #[should_panic]
