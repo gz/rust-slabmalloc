@@ -108,53 +108,104 @@ impl<'a> ZoneAllocator<'a>{
     }
 }
 
+type Link<'a> = Option<&'a mut SlabPage<'a>>;
+
+pub struct DList<'a> {
+    head: Link<'a>,
+    pub head_elements: usize
+}
+
+impl<'a> DList<'a> {
+
+    pub fn iter_mut<'b>(&'b mut self) -> SlabPageIter<'a> {
+        let m = match self.head {
+            None => Rawlink::none(),
+            Some(ref mut m) => Rawlink::some(*m)
+        };
+        SlabPageIter { head: m }
+    }
+
+    //#[cfg(test)]
+    fn insert_front<'b>(&'b mut self, mut new_head: &'a mut SlabPage<'a>) {
+        match self.head {
+            None => {
+                //new_head.prev = Rawlink::none();
+                self.head = Some(new_head);
+            }
+            Some(ref mut head) => {
+                //println!("inserting at front");
+                //new_head.prev = Rawlink::none();
+                //head.prev = Rawlink::some(new_head);
+                mem::swap(head, &mut new_head);
+                head.next = Some(new_head);
+            }
+        }
+        self.head_elements += 1;
+    }
+
+}
+
 /// A slab allocator allocates elements of a fixed size and stores
 /// them within a list of pages.
 pub struct SlabAllocator<'a> {
     pub size: usize,
     pager: &'a SlabPageAllocator<'a>,
-    pub allocateable_elements: usize,
-    allocateable: Option<&'a mut SlabPage<'a>>,
+    allocateable: DList<'a>,
+}
+
+/// Iterate over all the pages in the slab allocator
+pub struct SlabPageIter<'a> {
+    head: Rawlink<SlabPage<'a>>
+}
+
+/// Holds allocated data. Objects life within data and meta tracks the objects
+/// status.
+pub struct SlabPage<'a> {
+    data: [u8; 4096 - 64],
+
+    /// Next element in list
+    next: Link<'a>,
+    prev: Link<'a>,
+
+    // Note: with only 48 bits we do waste some space for the
+    // 8 bytes slab allocator. But 12 bytes on-wards is ok.
+    bitfield: [u8; CACHE_LINE_SIZE - 16]
+}
+
+impl<'a> Iterator for SlabPageIter<'a> {
+    type Item = &'a mut SlabPage<'a>;
+
+    #[inline]
+    fn next(&mut self) -> Option<&'a mut SlabPage<'a>> {
+        unsafe {
+            self.head.resolve_mut().map(|next| {
+                let r = match next.next {
+                    None => Rawlink::none(),
+                    Some(ref mut sp) => Rawlink::some(*sp)
+                };
+                self.head = r;
+                next
+            })
+        }
+    }
+
 }
 
 impl<'a> SlabAllocator<'a> {
 
-    fn refill_slab(&'a mut self, amount: usize) {
+    fn refill_slab<'b>(&'b mut self, amount: usize) {
         match self.pager.allocate_slabpage() {
             Some(new_head) => {
-                self.insert_front(new_head);
+                self.allocateable.insert_front(new_head);
             },
             None => panic!("OOM")
         }
     }
 
-    pub fn iter_mut(&'a mut self) -> SlabPageIter<'a> {
-        SlabPageIter { head: Rawlink::from(&mut self.allocateable) }
-    }
-
-    //#[cfg(test)]
-    fn insert_front(&'a mut self, mut new_head: &'a mut SlabPage<'a>) {
-        match self.allocateable {
-            None => {
-                new_head.prev = Rawlink::none();
-                self.allocateable = Some(new_head);
-            }
-            Some(ref mut head) => {
-                //println!("inserting at front");
-                new_head.prev = Rawlink::none();
-                head.prev = Rawlink::some(new_head);
-                mem::swap(head, &mut new_head);
-                head.next = Some(new_head);
-            }
-        }
-        self.allocateable_elements += 1;
-    }
-
-
-    fn try_allocate(&'a mut self, alignment: usize) -> Option<*mut u8> {
+    fn try_allocate<'b>(&'b mut self, alignment: usize) -> Option<*mut u8> {
 
         let size = self.size;
-        for (idx, slab_page) in self.iter_mut().enumerate() {
+        for (idx, slab_page) in self.allocateable.iter_mut().enumerate() {
             match slab_page.allocate(size, alignment) {
                 None => { continue },
                 Some(obj) => {
@@ -171,26 +222,24 @@ impl<'a> SlabAllocator<'a> {
     }
 
 
-    fn has_slabpage(&'a self, s: &'a SlabPage<'a>) -> bool {
+    fn has_slabpage<'b>(&'b self, s: &'a SlabPage<'a>) -> bool {
         true
     }
 
-    pub fn allocate(&'a mut self, alignment: usize) -> Option<*mut u8> {
+    pub fn allocate<'b>(&'b mut self, alignment: usize) -> Option<*mut u8> {
         assert!(self.size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
 
-        /*match self.try_allocate(alignment) {
-            None => { self.refill_slab(1); None },
+        match self.try_allocate(alignment) {
+            None => { self.refill_slab(1); return self.allocate(alignment); },
             Some(obj) => return Some(obj),
-        }*/
-
-        self.try_allocate(alignment)
+        }
     }
 
     fn remove_from_list(head: &'a mut Option<&'a mut SlabPage<'a>>, p: &'a mut SlabPage<'a>) {
 
     }
 
-    pub fn deallocate(&'a mut self, ptr: *mut u8) {
+    pub fn deallocate<'b>(&'b mut self, ptr: *mut u8) {
         let page = (ptr as usize) & !0xfff;
         let mut slab_page = unsafe {
             mem::transmute::<VAddr, &'a mut SlabPage>(page)
@@ -205,19 +254,7 @@ impl<'a> SlabAllocator<'a> {
 unsafe impl<'a> Send for SlabPage<'a> { }
 unsafe impl<'a> Sync for SlabPage<'a> { }
 
-/// Holds allocated data. Objects life within data and meta tracks the objects
-/// status.
-pub struct SlabPage<'a> {
-    data: [u8; 4096 - 64],
 
-    /// Next element in list
-    next: Option<&'a mut SlabPage<'a>>,
-    /// Pointer to previous element.
-    prev: Rawlink<SlabPage<'a>>,
-    // Note: with only 48 bits we do waste some space for the
-    // 8 bytes slab allocator. But 12 bytes on-wards is ok.
-    bitfield: [u8; CACHE_LINE_SIZE - 16]
-}
 
 impl<'a> fmt::Debug for SlabPage<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -303,26 +340,6 @@ impl<'a> SlabPage<'a> {
 
     pub fn is_full(&self) -> bool {
         self.bitfield.iter().filter(|&x| *x != 0xff).count() == 0
-    }
-
-}
-
-/// Iterate over all the pages in the slab allocator
-pub struct SlabPageIter<'a> {
-    head: Rawlink<&'a mut SlabPage<'a>>
-}
-
-impl<'a> Iterator for SlabPageIter<'a> {
-    type Item = &'a mut SlabPage<'a>;
-
-    #[inline]
-    fn next(&mut self) -> Option<&'a mut SlabPage<'a>> {
-        unsafe {
-            self.head.resolve_mut().map(|next| {
-                self.head = Rawlink::from(&mut next.next);
-                &mut next.value
-            })
-        }
     }
 
 }

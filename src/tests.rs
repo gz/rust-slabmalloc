@@ -5,7 +5,7 @@ use rand;
 use std::mem::size_of;
 
 // The types we want to test:
-use super::{ZoneAllocator, SlabPage, SlabAllocator, SlabPageAllocator};
+use super::{DList, ZoneAllocator, SlabPage, SlabAllocator, SlabPageAllocator};
 
 #[cfg(target_arch="x86_64")]
 use x86::paging::{CACHE_LINE_SIZE, BASE_PAGE_SIZE};
@@ -70,8 +70,7 @@ macro_rules! test_slab_allocation {
             let mut sa: SlabAllocator = SlabAllocator{
                 size: $size,
                 pager: &mmap,
-                allocateable_elements: 0,
-                allocateable: None,
+                allocateable: DList { head: None, head_elements: 0 },
             };
             let alignment = $alignment;
 
@@ -105,7 +104,7 @@ macro_rules! test_slab_allocation {
             }
 
             // Make sure we can correctly deallocate:
-            let pages_allocated = sa.allocateable_elements;
+            let pages_allocated = sa.allocateable.head_elements;
 
             println!("Deallocate all the objects");
             for item in objects.iter_mut() {
@@ -124,9 +123,9 @@ macro_rules! test_slab_allocation {
                 }
             }
 
-            println!("{} {}", pages_allocated, sa.allocateable_elements);
+            println!("{} {}", pages_allocated, sa.allocateable.head_elements);
             // and make sure we do not request more pages than what we had previously
-            assert!(pages_allocated == sa.allocateable_elements,
+            assert!(pages_allocated == sa.allocateable.head_elements,
                     "Did not use more memory for 2nd allocation run.");
         }
 
@@ -161,8 +160,7 @@ fn allocation_too_big() {
     let mut sa: SlabAllocator = SlabAllocator{
         size: 10,
         pager: &mmap,
-        allocateable_elements: 0,
-        allocateable: None,
+        allocateable: DList { head: None, head_elements: 0 },
     };
 
     sa.allocate(4096-CACHE_LINE_SIZE+1);
@@ -175,8 +173,7 @@ fn invalid_alignment() {
     let mut sa: SlabAllocator = SlabAllocator{
         size: 10,
         pager: &mmap,
-        allocateable_elements: 0,
-        allocateable: None,
+        allocateable: DList { head: None, head_elements: 0 },
     };
 
     sa.allocate(3);
