@@ -12,7 +12,7 @@
 //!   SlabAllocator to allocate SlabPages.
 //!
 #![allow(unused_features, dead_code, unused_variables)]
-#![feature(test, no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
+#![feature(prelude_import, test, no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
 #![no_std]
 
 #![crate_name = "slabmalloc"]
