@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["IA32_EFER","Extended Feature Enables"],["IA32_FMASK","System Call Flag Mask (R/W)"],["IA32_LSTAR","IA-32e Mode System Call Target Address"],["IA32_STAR","System Call Target Address (R/W)"]],"fn":[["rdmsr","Read 64 bits msr register."],["wrmsr","Write 64 bits to msr register."]]});
