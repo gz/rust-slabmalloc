@@ -1,7 +1,5 @@
 #![allow(unused_features, dead_code, unused_variables)]
-
-#![feature(no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
-
+#![feature(test, no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
 #![no_std]
 
 #![crate_name = "slabmalloc"]
@@ -11,6 +9,8 @@
 #[cfg(test)]
 #[macro_use]
 extern crate std;
+#[cfg(test)]
+extern crate test;
 
 #[cfg(test)]
 #[prelude_import]
@@ -40,6 +40,7 @@ pub const EMPTY: *mut () = 0x1 as *mut ();
 pub const MAX_SLABS: usize = 9;
 
 /// The memory backing as used by the SlabAllocator.
+///
 /// A client that wants to use the Zone/Slab allocators
 /// has to provide this interface.
 trait SlabPageAllocator<'a> {
@@ -47,7 +48,9 @@ trait SlabPageAllocator<'a> {
     fn release_slabpage(&self, &'a SlabPage<'a>);
 }
 
-/// A zone allocator has a bunch of slab allocators and can serve
+/// A zone allocator.
+///
+/// Has a bunch of slab allocators and can serve
 /// allocation requests for many different (MAX_SLABS) object sizes
 /// (by selecting the right slab allocator).
 pub struct ZoneAllocator<'a> {
@@ -84,7 +87,6 @@ impl<'a> ZoneAllocator<'a>{
                 None => None,
                 Some(idx) => {
                     if self.slabs[idx].size == 0 {
-                        //log!("Initialize slab at idx {} / size_class {}", idx, size_class);
                         self.slabs[idx].size = size_class;
                     }
                     Some(idx)
@@ -108,39 +110,38 @@ impl<'a> ZoneAllocator<'a>{
     }
 }
 
-type Link<'a> = Option<&'a mut SlabPage<'a>>;
-
-pub struct DList<'a> {
-    head: Link<'a>,
+pub struct SlabList<'a> {
+    head: Option<&'a mut SlabPage<'a>>,
     pub head_elements: usize
 }
 
-impl<'a> DList<'a> {
+impl<'a> SlabList<'a> {
 
-    pub fn iter_mut<'b>(&'b mut self) -> SlabPageIter<'a> {
+    pub fn iter_mut<'b>(&'b mut self) -> SlabPageIterMut<'a> {
         let m = match self.head {
             None => Rawlink::none(),
             Some(ref mut m) => Rawlink::some(*m)
         };
-        SlabPageIter { head: m }
+        SlabPageIterMut { head: m }
     }
 
-    //#[cfg(test)]
     fn insert_front<'b>(&'b mut self, mut new_head: &'a mut SlabPage<'a>) {
         match self.head {
             None => {
-                //new_head.prev = Rawlink::none();
+                new_head.prev = Rawlink::none();
                 self.head = Some(new_head);
             }
             Some(ref mut head) => {
-                //println!("inserting at front");
-                //new_head.prev = Rawlink::none();
-                //head.prev = Rawlink::some(new_head);
+                new_head.prev = Rawlink::none();
+                head.prev = Rawlink::some(new_head);
                 mem::swap(head, &mut new_head);
                 head.next = Some(new_head);
             }
         }
         self.head_elements += 1;
+    }
+
+    fn remove_from_list<'b>(&'b mut self, slab_page: &'a mut SlabPage<'a>) {
     }
 
 }
@@ -150,11 +151,11 @@ impl<'a> DList<'a> {
 pub struct SlabAllocator<'a> {
     pub size: usize,
     pager: &'a SlabPageAllocator<'a>,
-    allocateable: DList<'a>,
+    allocateable: SlabList<'a>,
 }
 
 /// Iterate over all the pages in the slab allocator
-pub struct SlabPageIter<'a> {
+pub struct SlabPageIterMut<'a> {
     head: Rawlink<SlabPage<'a>>
 }
 
@@ -164,15 +165,15 @@ pub struct SlabPage<'a> {
     data: [u8; 4096 - 64],
 
     /// Next element in list
-    next: Link<'a>,
-    prev: Link<'a>,
+    next: Option<&'a mut SlabPage<'a>>,
+    prev: Rawlink<SlabPage<'a>>,
 
     // Note: with only 48 bits we do waste some space for the
     // 8 bytes slab allocator. But 12 bytes on-wards is ok.
     bitfield: [u8; CACHE_LINE_SIZE - 16]
 }
 
-impl<'a> Iterator for SlabPageIter<'a> {
+impl<'a> Iterator for SlabPageIterMut<'a> {
     type Item = &'a mut SlabPage<'a>;
 
     #[inline]
@@ -188,7 +189,6 @@ impl<'a> Iterator for SlabPageIter<'a> {
             })
         }
     }
-
 }
 
 impl<'a> SlabAllocator<'a> {
@@ -233,10 +233,6 @@ impl<'a> SlabAllocator<'a> {
             None => { self.refill_slab(1); return self.allocate(alignment); },
             Some(obj) => return Some(obj),
         }
-    }
-
-    fn remove_from_list(head: &'a mut Option<&'a mut SlabPage<'a>>, p: &'a mut SlabPage<'a>) {
-
     }
 
     pub fn deallocate<'b>(&'b mut self, ptr: *mut u8) {

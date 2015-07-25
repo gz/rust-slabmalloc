@@ -5,10 +5,12 @@ use rand;
 use std::mem::size_of;
 
 // The types we want to test:
-use super::{DList, ZoneAllocator, SlabPage, SlabAllocator, SlabPageAllocator};
+use super::{SlabList, SlabPage, SlabAllocator, SlabPageAllocator};
 
 #[cfg(target_arch="x86_64")]
 use x86::paging::{CACHE_LINE_SIZE, BASE_PAGE_SIZE};
+
+use test::Bencher;
 
 /// Page allocator based on mmap/munmap system calls for backing slab memory.
 struct MmapSlabAllocator;
@@ -70,7 +72,7 @@ macro_rules! test_slab_allocation {
             let mut sa: SlabAllocator = SlabAllocator{
                 size: $size,
                 pager: &mmap,
-                allocateable: DList { head: None, head_elements: 0 },
+                allocateable: SlabList { head: None, head_elements: 0 },
             };
             let alignment = $alignment;
 
@@ -160,7 +162,7 @@ fn allocation_too_big() {
     let mut sa: SlabAllocator = SlabAllocator{
         size: 10,
         pager: &mmap,
-        allocateable: DList { head: None, head_elements: 0 },
+        allocateable: SlabList { head: None, head_elements: 0 },
     };
 
     sa.allocate(4096-CACHE_LINE_SIZE+1);
@@ -173,8 +175,33 @@ fn invalid_alignment() {
     let mut sa: SlabAllocator = SlabAllocator{
         size: 10,
         pager: &mmap,
-        allocateable: DList { head: None, head_elements: 0 },
+        allocateable: SlabList { head: None, head_elements: 0 },
     };
 
     sa.allocate(3);
+}
+
+#[bench]
+fn bench_allocate(b: &mut Bencher) {
+    let mmap = MmapSlabAllocator;
+    let mut sa: SlabAllocator = SlabAllocator{
+        size: 8,
+        pager: &mmap,
+        allocateable: SlabList { head: None, head_elements: 0 },
+    };
+
+    b.iter(|| sa.allocate(4));
+}
+
+
+#[bench]
+fn bench_allocate_big(b: &mut Bencher) {
+    let mmap = MmapSlabAllocator;
+    let mut sa: SlabAllocator = SlabAllocator{
+        size: 512,
+        pager: &mmap,
+        allocateable: SlabList { head: None, head_elements: 0 },
+    };
+
+    b.iter(|| sa.allocate(1));
 }
