@@ -30,7 +30,10 @@ let mut sa: SlabAllocator = SlabAllocator::new(object_size, &mmap);
 sa.allocate(alignment);
 ```
 
-The slabmalloc API is designed satisfy the rust liballoc low-level memory allocation interface. 
+The slabmalloc API is designed to satisfy the rust liballoc low-level memory allocation interface.
+
+## TODOs
+  * slabmalloc is not (yet) thread-safe.
 
 ## Documentation
 * [API Documentation](http://gz.github.io/rust-slabmalloc/slabmalloc/)
