@@ -5,15 +5,21 @@ use rand;
 use std::mem::size_of;
 
 // The types we want to test:
-use super::{SlabList, SlabPage, SlabAllocator, SlabPageAllocator};
+use super::{SlabPage, SlabAllocator, SlabPageAllocator};
 
 #[cfg(target_arch="x86_64")]
-use x86::paging::{CACHE_LINE_SIZE, BASE_PAGE_SIZE};
+use x86::paging::{BASE_PAGE_SIZE};
 
 use test::Bencher;
 
 /// Page allocator based on mmap/munmap system calls for backing slab memory.
 struct MmapSlabAllocator;
+
+impl MmapSlabAllocator {
+    pub fn new() -> MmapSlabAllocator {
+        MmapSlabAllocator
+    }
+}
 
 /// mmap/munmap page allocator implementation.
 impl<'a> SlabPageAllocator<'a> for MmapSlabAllocator {
@@ -35,7 +41,7 @@ impl<'a> SlabPageAllocator<'a> for MmapSlabAllocator {
         }
     }
 
-    fn release_slabpage(&self, p: &'a SlabPage<'a>) {
+    fn release_slabpage(&self, p: &'a mut SlabPage<'a>) {
         let addr: *mut libc::c_void = unsafe { transmute(p) };
         let len: libc::size_t = BASE_PAGE_SIZE;
         let r = unsafe { libc::munmap(addr, len) };
@@ -54,7 +60,7 @@ fn type_size() {
 
 #[test]
 fn test_mmap_allocator() {
-    let mmap = MmapSlabAllocator;
+    let mmap = MmapSlabAllocator::new();
     match mmap.allocate_slabpage() {
         Some(sp) =>  {
             assert!(!sp.is_full(), "Got empty slab");
@@ -68,67 +74,74 @@ macro_rules! test_slab_allocation {
     ( $test:ident, $size:expr, $alignment:expr, $allocations:expr  ) => {
         #[test]
         fn $test() {
-            let mmap = MmapSlabAllocator;
-            let mut sa: SlabAllocator = SlabAllocator{
-                size: $size,
-                pager: &mmap,
-                allocateable: SlabList { head: None, head_elements: 0 },
-            };
-            let alignment = $alignment;
+            let mut mmap = MmapSlabAllocator::new();
 
-            let mut objects: Vec<*mut u8> = Vec::new();
-            let mut vec: Vec<(usize, &mut [usize; $size / 8])> = Vec::new();
+            {
+                let mut sa: SlabAllocator = SlabAllocator::new($size, &mut mmap);
+                let alignment = $alignment;
 
-            for _ in 0..$allocations {
-                match sa.allocate(alignment) {
-                    None => panic!("OOM is unlikely."),
-                    Some(obj) => {
-                        unsafe { vec.push( (rand::random::<usize>(), transmute(obj)) ) };
-                        objects.push(obj)
+                let mut objects: Vec<*mut u8> = Vec::new();
+                let mut vec: Vec<(usize, &mut [usize; $size / 8])> = Vec::new();
+
+                for _ in 0..$allocations {
+                    match sa.allocate(alignment) {
+                        None => panic!("OOM is unlikely."),
+                        Some(obj) => {
+                            unsafe { vec.push( (rand::random::<usize>(), transmute(obj)) ) };
+                            objects.push(obj)
+                        }
                     }
                 }
-            }
 
-            // Write the objects with a random pattern
-            for item in vec.iter_mut() {
-                let (pattern, ref mut obj) = *item;
-                for i in 0..obj.len() {
-                    obj[i] = pattern;
-                }
-            }
-
-            for item in vec.iter() {
-                let (pattern, ref obj) = *item;
-                //assert!(**obj as usize % alignment == 0, "Object allocation respects alignment.");
-                for i in 0..obj.len() {
-                    assert!( (obj[i]) == pattern, "No two allocations point to the same memory.");
-                }
-            }
-
-            // Make sure we can correctly deallocate:
-            let pages_allocated = sa.allocateable.head_elements;
-
-            //println!("Deallocate all the objects");
-            for item in objects.iter_mut() {
-                sa.deallocate(*item);
-            }
-
-            // then allocate everything again,
-            for idx in 0..$allocations {
-                //println!("{:?}", idx);
-                match sa.allocate(alignment) {
-                    None => panic!("OOM is unlikely."),
-                    Some(obj) => {
-                        unsafe { vec.push( (rand::random::<usize>(), transmute(obj)) ) };
-                        objects.push(obj)
+                // Write the objects with a random pattern
+                for item in vec.iter_mut() {
+                    let (pattern, ref mut obj) = *item;
+                    for i in 0..obj.len() {
+                        obj[i] = pattern;
                     }
                 }
+
+                for item in vec.iter() {
+                    let (pattern, ref obj) = *item;
+                    for i in 0..obj.len() {
+                        assert!( (obj[i]) == pattern, "No two allocations point to the same memory.");
+                    }
+                }
+
+                // Make sure we can correctly deallocate:
+                let pages_allocated = sa.slabs.elements;
+
+                // Deallocate all the objects
+                for item in objects.iter_mut() {
+                    sa.deallocate(*item);
+                }
+
+                objects.clear();
+
+                // then allocate everything again,
+                for idx in 0..$allocations {
+                    match sa.allocate(alignment) {
+                        None => panic!("OOM is unlikely."),
+                        Some(obj) => {
+                            unsafe { vec.push( (rand::random::<usize>(), transmute(obj)) ) };
+                            objects.push(obj)
+                        }
+                    }
+                }
+
+                // and make sure we do not request more pages than what we had previously
+                // println!("{} {}", pages_allocated, sa.slabs.elements);
+                assert!(pages_allocated == sa.slabs.elements,
+                        "Did not use more memory for 2nd allocation run.");
+
+                // Deallocate everything once more
+                for item in objects.iter_mut() {
+                    sa.deallocate(*item);
+                }
             }
 
-            println!("{} {}", pages_allocated, sa.allocateable.head_elements);
-            // and make sure we do not request more pages than what we had previously
-            assert!(pages_allocated == sa.allocateable.head_elements,
-                    "Did not use more memory for 2nd allocation run.");
+            // Check that we released everything to our page allocator:
+            // assert!(mmap.currently_allocated() == 0, "Released all pages to underlying memory manager.");
         }
 
     };
@@ -155,40 +168,20 @@ test_slab_allocation!(test_slab_allocation1000_size512_alignment1, 512, 1, 1000)
 test_slab_allocation!(test_slab_allocation4096_size1024_alignment1, 1024, 1, 4096);
 test_slab_allocation!(test_slab_allocation10_size2048_alignment1, 2048, 1, 10);
 
-#[test]
-#[should_panic]
-fn allocation_too_big() {
-    let mmap = MmapSlabAllocator;
-    let mut sa: SlabAllocator = SlabAllocator{
-        size: 10,
-        pager: &mmap,
-        allocateable: SlabList { head: None, head_elements: 0 },
-    };
-
-    sa.allocate(4096-CACHE_LINE_SIZE+1);
-}
 
 #[test]
 #[should_panic]
 fn invalid_alignment() {
-    let mmap = MmapSlabAllocator;
-    let mut sa: SlabAllocator = SlabAllocator{
-        size: 10,
-        pager: &mmap,
-        allocateable: SlabList { head: None, head_elements: 0 },
-    };
+    let mmap = MmapSlabAllocator::new();
+    let mut sa: SlabAllocator = SlabAllocator::new(10, &mmap);
 
     sa.allocate(3);
 }
 
 #[bench]
 fn bench_allocate(b: &mut Bencher) {
-    let mmap = MmapSlabAllocator;
-    let mut sa: SlabAllocator = SlabAllocator{
-        size: 8,
-        pager: &mmap,
-        allocateable: SlabList { head: None, head_elements: 0 },
-    };
+    let mmap = MmapSlabAllocator::new();
+    let mut sa: SlabAllocator = SlabAllocator::new(8, &mmap);
 
     b.iter(|| sa.allocate(4));
 }
@@ -196,12 +189,8 @@ fn bench_allocate(b: &mut Bencher) {
 
 #[bench]
 fn bench_allocate_big(b: &mut Bencher) {
-    let mmap = MmapSlabAllocator;
-    let mut sa: SlabAllocator = SlabAllocator{
-        size: 512,
-        pager: &mmap,
-        allocateable: SlabList { head: None, head_elements: 0 },
-    };
+    let mmap = MmapSlabAllocator::new();
+    let mut sa: SlabAllocator = SlabAllocator::new(512, &mmap);
 
     b.iter(|| sa.allocate(1));
 }
