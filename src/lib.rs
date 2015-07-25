@@ -256,7 +256,7 @@ impl<'a> SlabList<'a> {
 }
 
 /// Iterate over all the pages inside a slab allocator
-pub struct SlabPageIterMut<'a> {
+struct SlabPageIterMut<'a> {
     head: Rawlink<SlabPage<'a>>
 }
 
@@ -460,7 +460,7 @@ impl<'a> SlabPage<'a> {
     }
 
     /// Deallocates a memory object within this page.
-    pub fn deallocate(&mut self, ptr: *mut u8, size: usize) {
+    fn deallocate(&mut self, ptr: *mut u8, size: usize) {
         let page_offset = (ptr as usize) & 0xfff;
         assert!(page_offset % size == 0);
         let idx = page_offset / size;
@@ -472,7 +472,7 @@ impl<'a> SlabPage<'a> {
     /// Tries to allocate an object within this page.
     ///
     /// In case the Slab is full, returns None.
-    pub fn allocate(&mut self, size: usize, alignment: usize) -> Option<*mut u8> {
+    fn allocate(&mut self, size: usize, alignment: usize) -> Option<*mut u8> {
         match self.first_fit(size, alignment) {
             Some((idx, addr)) => {
                 self.set_bit(idx);
@@ -483,12 +483,12 @@ impl<'a> SlabPage<'a> {
     }
 
     /// Checks if we can still allocate more objects within the page.
-    pub fn is_full(&self) -> bool {
+    fn is_full(&self) -> bool {
         self.bitfield.iter().filter(|&x| *x != 0xff).count() == 0
     }
 
     /// Checks if the page has currently no allocation.
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.bitfield.iter().filter(|&x| *x > 0x00).count() == 0
     }
 
