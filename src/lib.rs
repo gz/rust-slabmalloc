@@ -147,13 +147,12 @@ impl<'a> ZoneAllocator<'a>{
 
     /// Allocate a pointer to a block of memory of size `size` with alignment `align`.
     ///
-    /// # Panics
-    /// * No more memory available to satisfy request.
-    ///
+    /// Returns None in case the zone allocator can not satisfy the allocation
+    /// of the requested size.
     pub fn allocate(&'a mut self, size: usize, align: usize) -> Option<*mut u8> {
         match self.try_acquire_slab(size) {
             Some(idx) => self.slabs[idx].allocate(align),
-            None => panic!("Unable to find slab allocator for size ({})", size)
+            None => None
         }
     }
 
