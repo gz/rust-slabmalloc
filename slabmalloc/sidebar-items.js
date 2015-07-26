@@ -1,1 +1,1 @@
-initSidebarItems({"constant":[["MAX_SLABS",""]],"struct":[["SlabAllocator","A slab allocator allocates elements of a fixed size."],["SlabPage","Holds allocated data."],["ZoneAllocator","A zone allocator."]],"trait":[["SlabPageAllocator","The memory backing as used by the SlabAllocator."]]});
+initSidebarItems({"struct":[["SlabAllocator","A slab allocator allocates elements of a fixed size."],["SlabPage","Holds allocated data."],["ZoneAllocator","A zone allocator."]],"trait":[["SlabPageProvider","The memory backing as used by the SlabAllocator."]]});

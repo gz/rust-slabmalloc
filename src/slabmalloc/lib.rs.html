@@ -582,18 +582,18 @@
 <span class='doccomment'>//! A slab allocator implementation for small objects</span>
 <span class='doccomment'>//! (&lt; architecture page size).</span>
 <span class='doccomment'>//!</span>
-<span class='doccomment'>//! The organization is as follow (top-down):</span>
-<span class='doccomment'>//! * A ZoneAllocator manages many SlabAllocator and can</span>
-<span class='doccomment'>//!   satisfy requests for different allocation sizes.</span>
-<span class='doccomment'>//! * A SlabAllocator allocates objects of exactly one size.</span>
-<span class='doccomment'>//!   It holds its data in a SlabList.</span>
-<span class='doccomment'>//! * A SlabList is a linked-list containing SlabPages.</span>
-<span class='doccomment'>//! * A SlabPage contains allocated objects and associated meta-data.</span>
-<span class='doccomment'>//! * A SlabPageAllocator is provided by the client and used by the</span>
-<span class='doccomment'>//!   SlabAllocator to allocate SlabPages.</span>
+<span class='doccomment'>//! The organization is as follows (top-down):</span>
+<span class='doccomment'>//!</span>
+<span class='doccomment'>//!  * A `ZoneAllocator` manages many `SlabAllocator` and can</span>
+<span class='doccomment'>//!    satisfy requests for different allocation sizes.</span>
+<span class='doccomment'>//!  * A `SlabAllocator` allocates objects of exactly one size.</span>
+<span class='doccomment'>//!    It holds its data in a SlabList.</span>
+<span class='doccomment'>//!  * A `SlabPage` contains allocated objects and associated meta-data.</span>
+<span class='doccomment'>//!  * A `SlabPageProvider` is provided by the client and used by the</span>
+<span class='doccomment'>//!    SlabAllocator to allocate SlabPages.</span>
 <span class='doccomment'>//!</span>
 <span class='attribute'>#<span class='op'>!</span>[<span class='ident'>allow</span>(<span class='ident'>unused_features</span>, <span class='ident'>dead_code</span>, <span class='ident'>unused_variables</span>)]</span>
-<span class='attribute'>#<span class='op'>!</span>[<span class='ident'>feature</span>(<span class='ident'>test</span>, <span class='ident'>no_std</span>, <span class='ident'>core</span>, <span class='ident'>raw</span>, <span class='ident'>ptr_as_ref</span>, <span class='ident'>core_prelude</span>, <span class='ident'>core_slice_ext</span>, <span class='ident'>libc</span>)]</span>
+<span class='attribute'>#<span class='op'>!</span>[<span class='ident'>feature</span>(<span class='ident'>prelude_import</span>, <span class='ident'>test</span>, <span class='ident'>no_std</span>, <span class='ident'>core</span>, <span class='ident'>raw</span>, <span class='ident'>ptr_as_ref</span>, <span class='ident'>core_prelude</span>, <span class='ident'>core_slice_ext</span>, <span class='ident'>libc</span>)]</span>
 <span class='attribute'>#<span class='op'>!</span>[<span class='ident'>no_std</span>]</span>
 
 <span class='attribute'>#<span class='op'>!</span>[<span class='ident'>crate_name</span> <span class='op'>=</span> <span class='string'>&quot;slabmalloc&quot;</span>]</span>
@@ -629,14 +629,14 @@
 <span class='attribute'>#[<span class='ident'>cfg</span>(<span class='ident'>test</span>)]</span>
 <span class='kw'>mod</span> <span class='ident'>tests</span>;
 
-<span class='kw'>pub</span> <span class='kw'>const</span> <span class='ident'>MAX_SLABS</span>: <span class='ident'>usize</span> <span class='op'>=</span> <span class='number'>10</span>;
+<span class='kw'>const</span> <span class='ident'>MAX_SLABS</span>: <span class='ident'>usize</span> <span class='op'>=</span> <span class='number'>10</span>;
 
 <span class='doccomment'>/// The memory backing as used by the SlabAllocator.</span>
 <span class='doccomment'>///</span>
 <span class='doccomment'>/// A client that wants to use the Zone/Slab allocators</span>
 <span class='doccomment'>/// has to provide this interface and stick an implementation of it</span>
 <span class='doccomment'>/// into every SlabAllocator.</span>
-<span class='kw'>pub</span> <span class='kw'>trait</span> <span class='ident'>SlabPageAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
+<span class='kw'>pub</span> <span class='kw'>trait</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
     <span class='kw'>fn</span> <span class='ident'>allocate_slabpage</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPage</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;&gt;</span>;
     <span class='kw'>fn</span> <span class='ident'>release_slabpage</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPage</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>);
 }
@@ -652,7 +652,7 @@
 
 <span class='kw'>impl</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> <span class='ident'>ZoneAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>{
 
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span>(<span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>) <span class='op'>-&gt;</span> <span class='ident'>ZoneAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span>(<span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>) <span class='op'>-&gt;</span> <span class='ident'>ZoneAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
         <span class='ident'>ZoneAllocator</span>{
             <span class='ident'>slabs</span>: [
                 <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>8</span>, <span class='ident'>pager</span>),
@@ -867,7 +867,7 @@
     <span class='doccomment'>/// Allocation size.</span>
     <span class='ident'>size</span>: <span class='ident'>usize</span>,
     <span class='doccomment'>/// Memory backing store, to request new SlabPages.</span>
-    <span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>,
+    <span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>,
     <span class='doccomment'>/// List of SlabPages.</span>
     <span class='ident'>slabs</span>: <span class='ident'>SlabList</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>,
 }
@@ -875,7 +875,7 @@
 <span class='kw'>impl</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> <span class='ident'>SlabAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
 
     <span class='doccomment'>/// Create a new SlabAllocator.</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='ident'>size</span>: <span class='ident'>usize</span>, <span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>) <span class='op'>-&gt;</span> <span class='ident'>SlabAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='ident'>size</span>: <span class='ident'>usize</span>, <span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>) <span class='op'>-&gt;</span> <span class='ident'>SlabAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
         <span class='ident'>SlabAllocator</span>{
             <span class='ident'>size</span>: <span class='ident'>size</span>,
             <span class='ident'>pager</span>: <span class='ident'>pager</span>,

@@ -49,15 +49,17 @@
 <div class='docblock'><p>A slab allocator implementation for small objects
 (&lt; architecture page size).</p>
 
-<p>The organization is as follow (top-down):
-* A ZoneAllocator manages many SlabAllocator and can
-  satisfy requests for different allocation sizes.
-* A SlabAllocator allocates objects of exactly one size.
-  It holds its data in a SlabList.
-* A SlabList is a linked-list containing SlabPages.
-* A SlabPage contains allocated objects and associated meta-data.
-* A SlabPageAllocator is provided by the client and used by the
-  SlabAllocator to allocate SlabPages.</p>
+<p>The organization is as follows (top-down):</p>
+
+<ul>
+<li>A <code>ZoneAllocator</code> manages many <code>SlabAllocator</code> and can
+satisfy requests for different allocation sizes.</li>
+<li>A <code>SlabAllocator</code> allocates objects of exactly one size.
+It holds its data in a SlabList.</li>
+<li>A <code>SlabPage</code> contains allocated objects and associated meta-data.</li>
+<li>A <code>SlabPageProvider</code> is provided by the client and used by the
+SlabAllocator to allocate SlabPages.</li>
+</ul>
 </div><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
 <table>
                     <tr class=' module-item'>
@@ -86,20 +88,11 @@
 
                         </td>
                     </tr>
-                </table><h2 id='constants' class='section-header'><a href="#constants">Constants</a></h2>
-<table>
-                    <tr class=' module-item'>
-                        <td><a class='constant' href='constant.MAX_SLABS.html'
-                               title='slabmalloc::MAX_SLABS'>MAX_SLABS</a></td>
-                        <td class='docblock short'>
-                             
-                        </td>
-                    </tr>
                 </table><h2 id='traits' class='section-header'><a href="#traits">Traits</a></h2>
 <table>
                     <tr class=' module-item'>
-                        <td><a class='trait' href='trait.SlabPageAllocator.html'
-                               title='slabmalloc::SlabPageAllocator'>SlabPageAllocator</a></td>
+                        <td><a class='trait' href='trait.SlabPageProvider.html'
+                               title='slabmalloc::SlabPageProvider'>SlabPageProvider</a></td>
                         <td class='docblock short'>
                              <p>The memory backing as used by the SlabAllocator.</p>
 
