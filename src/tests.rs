@@ -5,7 +5,7 @@ use rand;
 use std::mem::size_of;
 
 // The types we want to test:
-use super::{SlabPage, SlabAllocator, SlabPageAllocator};
+use super::{SlabPage, SlabAllocator, SlabPageProvider};
 
 #[cfg(target_arch="x86_64")]
 use x86::paging::{BASE_PAGE_SIZE};
@@ -22,7 +22,7 @@ impl MmapSlabAllocator {
 }
 
 /// mmap/munmap page allocator implementation.
-impl<'a> SlabPageAllocator<'a> for MmapSlabAllocator {
+impl<'a> SlabPageProvider<'a> for MmapSlabAllocator {
 
     fn allocate_slabpage(&self) -> Option<&'a mut SlabPage<'a>> {
         let mut addr: libc::c_void = libc::c_void::__variant1;

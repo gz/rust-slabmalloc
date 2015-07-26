@@ -1,15 +1,15 @@
 //! A slab allocator implementation for small objects
 //! (< architecture page size).
 //!
-//! The organization is as follow (top-down):
-//! * A ZoneAllocator manages many SlabAllocator and can
-//!   satisfy requests for different allocation sizes.
-//! * A SlabAllocator allocates objects of exactly one size.
-//!   It holds its data in a SlabList.
-//! * A SlabList is a linked-list containing SlabPages.
-//! * A SlabPage contains allocated objects and associated meta-data.
-//! * A SlabPageAllocator is provided by the client and used by the
-//!   SlabAllocator to allocate SlabPages.
+//! The organization is as follows (top-down):
+//!
+//!  * A `ZoneAllocator` manages many `SlabAllocator` and can
+//!    satisfy requests for different allocation sizes.
+//!  * A `SlabAllocator` allocates objects of exactly one size.
+//!    It holds its data in a SlabList.
+//!  * A `SlabPage` contains allocated objects and associated meta-data.
+//!  * A `SlabPageProvider` is provided by the client and used by the
+//!    SlabAllocator to allocate SlabPages.
 //!
 #![allow(unused_features, dead_code, unused_variables)]
 #![feature(prelude_import, test, no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
@@ -48,14 +48,14 @@ extern crate rand;
 #[cfg(test)]
 mod tests;
 
-pub const MAX_SLABS: usize = 10;
+const MAX_SLABS: usize = 10;
 
 /// The memory backing as used by the SlabAllocator.
 ///
 /// A client that wants to use the Zone/Slab allocators
 /// has to provide this interface and stick an implementation of it
 /// into every SlabAllocator.
-pub trait SlabPageAllocator<'a> {
+pub trait SlabPageProvider<'a> {
     fn allocate_slabpage(&self) -> Option<&'a mut SlabPage<'a>>;
     fn release_slabpage(&self, &'a mut SlabPage<'a>);
 }
@@ -71,7 +71,7 @@ pub struct ZoneAllocator<'a> {
 
 impl<'a> ZoneAllocator<'a>{
 
-    pub fn new(pager: &'a SlabPageAllocator<'a>) -> ZoneAllocator<'a> {
+    pub fn new(pager: &'a SlabPageProvider<'a>) -> ZoneAllocator<'a> {
         ZoneAllocator{
             slabs: [
                 SlabAllocator::new(8, pager),
@@ -286,7 +286,7 @@ pub struct SlabAllocator<'a> {
     /// Allocation size.
     size: usize,
     /// Memory backing store, to request new SlabPages.
-    pager: &'a SlabPageAllocator<'a>,
+    pager: &'a SlabPageProvider<'a>,
     /// List of SlabPages.
     slabs: SlabList<'a>,
 }
@@ -294,7 +294,7 @@ pub struct SlabAllocator<'a> {
 impl<'a> SlabAllocator<'a> {
 
     /// Create a new SlabAllocator.
-    pub fn new<'b>(size: usize, pager: &'a SlabPageAllocator<'a>) -> SlabAllocator<'a> {
+    pub fn new<'b>(size: usize, pager: &'a SlabPageProvider<'a>) -> SlabAllocator<'a> {
         SlabAllocator{
             size: size,
             pager: pager,
