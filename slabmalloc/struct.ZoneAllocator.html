@@ -57,11 +57,8 @@ allocation requests for many different (MAX_SLABS) object sizes
 <h4 id='method.allocate' class='method'><code>fn <a href='#method.allocate' class='fnname'>allocate</a>(&amp;'a mut self, size: <a href='http://doc.rust-lang.org/nightly/core/primitive.usize.html'>usize</a>, align: <a href='http://doc.rust-lang.org/nightly/core/primitive.usize.html'>usize</a>) -&gt; <a class='enum' href='http://doc.rust-lang.org/nightly/core/option/enum.Option.html' title='core::option::Option'>Option</a>&lt;<a href='http://doc.rust-lang.org/nightly/core/primitive.pointer.html'>*mut <a href='http://doc.rust-lang.org/nightly/core/primitive.u8.html'>u8</a></a>&gt;</code></h4>
 <div class='docblock'><p>Allocate a pointer to a block of memory of size <code>size</code> with alignment <code>align</code>.</p>
 
-<h1 id="panics" class='section-header'><a
-                           href="#panics">Panics</a></h1>
-<ul>
-<li>No more memory available to satisfy request.</li>
-</ul>
+<p>Returns None in case the zone allocator can not satisfy the allocation
+of the requested size.</p>
 </div><h4 id='method.deallocate' class='method'><code>fn <a href='#method.deallocate' class='fnname'>deallocate</a>(&amp;'a mut self, ptr: <a href='http://doc.rust-lang.org/nightly/core/primitive.pointer.html'>*mut <a href='http://doc.rust-lang.org/nightly/core/primitive.u8.html'>u8</a></a>, old_size: <a href='http://doc.rust-lang.org/nightly/core/primitive.usize.html'>usize</a>, align: <a href='http://doc.rust-lang.org/nightly/core/primitive.usize.html'>usize</a>)</code></h4>
 <div class='docblock'><p>Deallocates a pointer to a block of memory previously allocated by <code>allocate</code>.</p>
 
