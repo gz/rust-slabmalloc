@@ -5,7 +5,7 @@ use rand;
 use std::mem::size_of;
 
 // The types we want to test:
-use super::{SlabPage, SlabAllocator, SlabPageProvider};
+use super::{ZoneAllocator, SlabPage, SlabAllocator, SlabPageProvider};
 
 #[cfg(target_arch="x86_64")]
 use x86::paging::{BASE_PAGE_SIZE};
@@ -13,18 +13,28 @@ use x86::paging::{BASE_PAGE_SIZE};
 use test::Bencher;
 
 /// Page allocator based on mmap/munmap system calls for backing slab memory.
-struct MmapSlabAllocator;
+struct MmapPageProvider {
+    currently_allocated: usize
+}
 
-impl MmapSlabAllocator {
-    pub fn new() -> MmapSlabAllocator {
-        MmapSlabAllocator
+impl MmapPageProvider {
+    pub fn new() -> MmapPageProvider {
+        MmapPageProvider{ currently_allocated: 0 }
     }
 }
 
-/// mmap/munmap page allocator implementation.
-impl<'a> SlabPageProvider<'a> for MmapSlabAllocator {
+impl MmapPageProvider {
+    pub fn currently_allocated(&self) -> usize {
+        self.currently_allocated
+    }
+}
 
-    fn allocate_slabpage(&self) -> Option<&'a mut SlabPage<'a>> {
+impl<'a> SlabPageProvider<'a> for MmapPageProvider {
+
+    /// Allocates a new SlabPage from the system.
+    ///
+    /// Uses `mmap` to map a page and casts it to a SlabPage.
+    fn allocate_slabpage(&mut self) -> Option<&'a mut SlabPage<'a>> {
         let mut addr: libc::c_void = libc::c_void::__variant1;
         let len: libc::size_t = BASE_PAGE_SIZE;
         let prot = libc::PROT_READ | libc::PROT_WRITE;
@@ -37,17 +47,22 @@ impl<'a> SlabPageProvider<'a> for MmapSlabAllocator {
         }
         else {
             let mut slab_page: &'a mut SlabPage = unsafe { transmute(r as usize) };
+            self.currently_allocated += 1;
             return Some(slab_page);
         }
     }
 
-    fn release_slabpage(&self, p: &'a mut SlabPage<'a>) {
+    /// Release a SlabPage back to the system.slab_page
+    ///
+    /// Uses `munmap` to release the page back to the OS.
+    fn release_slabpage(&mut self, p: &'a mut SlabPage<'a>) {
         let addr: *mut libc::c_void = unsafe { transmute(p) };
         let len: libc::size_t = BASE_PAGE_SIZE;
         let r = unsafe { libc::munmap(addr, len) };
         if r != 0 {
             panic!("munmap failed!");
         }
+        self.currently_allocated -= 1;
     }
 
 }
@@ -60,7 +75,7 @@ fn type_size() {
 
 #[test]
 fn test_mmap_allocator() {
-    let mmap = MmapSlabAllocator::new();
+    let mut mmap = MmapPageProvider::new();
     match mmap.allocate_slabpage() {
         Some(sp) =>  {
             assert!(!sp.is_full(), "Got empty slab");
@@ -74,10 +89,10 @@ macro_rules! test_slab_allocation {
     ( $test:ident, $size:expr, $alignment:expr, $allocations:expr  ) => {
         #[test]
         fn $test() {
-            let mut mmap = MmapSlabAllocator::new();
+            let mut mmap = MmapPageProvider::new();
 
             {
-                let mut sa: SlabAllocator = SlabAllocator::new($size, &mut mmap);
+                let mut sa: SlabAllocator = SlabAllocator::new($size, Some(&mut mmap));
                 let alignment = $alignment;
 
                 let mut objects: Vec<*mut u8> = Vec::new();
@@ -141,7 +156,7 @@ macro_rules! test_slab_allocation {
             }
 
             // Check that we released everything to our page allocator:
-            // assert!(mmap.currently_allocated() == 0, "Released all pages to underlying memory manager.");
+            assert!(mmap.currently_allocated() == 0, "Released all pages to underlying memory manager.");
         }
 
     };
@@ -168,20 +183,35 @@ test_slab_allocation!(test_slab_allocation1000_size512_alignment1, 512, 1, 1000)
 test_slab_allocation!(test_slab_allocation4096_size1024_alignment1, 1024, 1, 4096);
 test_slab_allocation!(test_slab_allocation10_size2048_alignment1, 2048, 1, 10);
 
-
 #[test]
 #[should_panic]
 fn invalid_alignment() {
-    let mmap = MmapSlabAllocator::new();
-    let mut sa: SlabAllocator = SlabAllocator::new(10, &mmap);
+    let mut mmap = MmapPageProvider::new();
+    let mut sa: SlabAllocator = SlabAllocator::new(10, Some(&mut mmap));
 
     sa.allocate(3);
 }
 
+//#[test]
+fn test_readme() {
+    let object_size = 12;
+    let alignment = 4;
+
+    let mut mmap = MmapPageProvider::new();
+    let mut zone = ZoneAllocator::new(Some(&mut mmap));
+
+    match zone.allocate(object_size, alignment) {
+        Some(ptr) => {
+            zone.deallocate(ptr, object_size, alignment)
+        }
+        None => println!("unable to alloc"),
+    };
+}
+
 #[bench]
 fn bench_allocate(b: &mut Bencher) {
-    let mmap = MmapSlabAllocator::new();
-    let mut sa: SlabAllocator = SlabAllocator::new(8, &mmap);
+    let mut mmap = MmapPageProvider::new();
+    let mut sa: SlabAllocator = SlabAllocator::new(8, Some(&mut mmap));
 
     b.iter(|| sa.allocate(4));
 }
@@ -189,8 +219,8 @@ fn bench_allocate(b: &mut Bencher) {
 
 #[bench]
 fn bench_allocate_big(b: &mut Bencher) {
-    let mmap = MmapSlabAllocator::new();
-    let mut sa: SlabAllocator = SlabAllocator::new(512, &mmap);
+    let mut mmap = MmapPageProvider::new();
+    let mut sa: SlabAllocator = SlabAllocator::new(512, Some(&mut mmap));
 
     b.iter(|| sa.allocate(1));
 }

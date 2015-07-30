@@ -24,6 +24,7 @@ extern crate std;
 #[cfg(test)]
 extern crate test;
 
+
 #[cfg(test)]
 #[prelude_import]
 use std::prelude::v1::*;
@@ -56,8 +57,8 @@ const MAX_SLABS: usize = 10;
 /// has to provide this interface and stick an implementation of it
 /// into every SlabAllocator.
 pub trait SlabPageProvider<'a> {
-    fn allocate_slabpage(&self) -> Option<&'a mut SlabPage<'a>>;
-    fn release_slabpage(&self, &'a mut SlabPage<'a>);
+    fn allocate_slabpage(&mut self) -> Option<&'a mut SlabPage<'a>>;
+    fn release_slabpage(&mut self, &'a mut SlabPage<'a>);
 }
 
 /// A zone allocator.
@@ -66,61 +67,43 @@ pub trait SlabPageProvider<'a> {
 /// allocation requests for many different (MAX_SLABS) object sizes
 /// (by selecting the right slab allocator).
 pub struct ZoneAllocator<'a> {
-    slabs: [SlabAllocator<'a>; MAX_SLABS]
+    pager: Option<&'a mut SlabPageProvider<'a>>,
+    slabs: [SlabAllocator<'a>; MAX_SLABS],
 }
 
 impl<'a> ZoneAllocator<'a>{
 
-    pub fn new(pager: &'a SlabPageProvider<'a>) -> ZoneAllocator<'a> {
+    pub fn new(pager: Option<&'a mut SlabPageProvider<'a>>) -> ZoneAllocator<'a> {
         ZoneAllocator{
+            pager: pager,
             slabs: [
-                SlabAllocator::new(8, pager),
-                SlabAllocator::new(16, pager),
-                SlabAllocator::new(32, pager),
-                SlabAllocator::new(64, pager),
-                SlabAllocator::new(128, pager),
-                SlabAllocator::new(256, pager),
-                SlabAllocator::new(512, pager),
-                SlabAllocator::new(1024, pager),
-                SlabAllocator::new(2048, pager),
-                SlabAllocator::new(4032, pager),
+                SlabAllocator::new(8, None),
+                SlabAllocator::new(16, None),
+                SlabAllocator::new(32, None),
+                SlabAllocator::new(64, None),
+                SlabAllocator::new(128, None),
+                SlabAllocator::new(256, None),
+                SlabAllocator::new(512, None),
+                SlabAllocator::new(1024, None),
+                SlabAllocator::new(2048, None),
+                SlabAllocator::new(4032, None),
             ]
         }
     }
 
-    /// Round-up the requested size to fit one of the slab allocators.
-    ///
-    /// Returns the size of the nearest size class that fits `requested_size`
-    /// or None in case allocation size is too big (i.e., large than a page).
-    fn get_size_class(requested_size: usize) -> Option<usize> {
-        match requested_size {
-            0...8 => Some(8),
-            9...16 => Some(16),
-            17...32 => Some(32),
-            33...64 => Some(64),
-            65...128 => Some(128),
-            129...256 => Some(256),
-            257...512 => Some(512),
-            513...1024 => Some(1024),
-            1025...2048 => Some(2048),
-            2049...4032 => Some(4032),
-            _ => None,
-        }
-    }
-
     /// Figure out index into zone array to get the correct slab allocator for that size.
-    fn get_slab_idx(size_class: usize) -> Option<usize> {
-        match size_class {
-            8 => Some(0),
-            16 => Some(1),
-            32 => Some(2),
-            64 => Some(3),
-            128 => Some(4),
-            256 => Some(5),
-            512 => Some(6),
-            1024 => Some(7),
-            2048 => Some(8),
-            4032 => Some(9),
+    fn get_slab_idx(requested_size: usize) -> Option<usize> {
+        match requested_size {
+            0...8 => Some(0),
+            9...16 => Some(1),
+            17...32 => Some(2),
+            33...64 => Some(3),
+            65...128 => Some(4),
+            129...256 => Some(5),
+            257...512 => Some(6),
+            513...1024 => Some(7),
+            1025...2048 => Some(8),
+            2049...4032 => Some(9),
             _ => None,
         }
     }
@@ -131,25 +114,19 @@ impl<'a> ZoneAllocator<'a>{
     /// the requested allocation size can not be satisfied by
     /// any of the available slabs.
     fn try_acquire_slab(&mut self, size: usize) -> Option<usize> {
-        match ZoneAllocator::get_size_class(size) {
-            None => None,
-            Some(size_class) => match ZoneAllocator::get_slab_idx(size_class) {
-                None => None,
-                Some(idx) => {
-                    if self.slabs[idx].size == 0 {
-                        self.slabs[idx].size = size_class;
-                    }
-                    Some(idx)
-                }
+        ZoneAllocator::get_slab_idx(size).map(|idx| {
+            if self.slabs[idx].size == 0 {
+                self.slabs[idx].size = size;
             }
-        }
+            idx
+        })
     }
 
     /// Allocate a pointer to a block of memory of size `size` with alignment `align`.
     ///
     /// Returns None in case the zone allocator can not satisfy the allocation
     /// of the requested size.
-    pub fn allocate(&'a mut self, size: usize, align: usize) -> Option<*mut u8> {
+    pub fn allocate<'b>(&'b mut self, size: usize, align: usize) -> Option<*mut u8> {
         match self.try_acquire_slab(size) {
             Some(idx) => self.slabs[idx].allocate(align),
             None => None
@@ -163,10 +140,10 @@ impl<'a> ZoneAllocator<'a>{
     ///  * `old_size` - Size of the block.
     ///  * `align` - Alignment of the block.
     ///
-    pub fn deallocate(&'a mut self, ptr: *mut u8, old_size: usize, align: usize) {
+    pub fn deallocate<'b>(&'b mut self, ptr: *mut u8, old_size: usize, align: usize) {
         match self.try_acquire_slab(old_size) {
             Some(idx) => self.slabs[idx].deallocate(ptr),
-            None => panic!("Unable to find slab allocator for size ({}) with ptr {:?}", old_size, ptr)
+            None => panic!("Unable to find slab allocator for size ({}) with ptr {:?}.", old_size, ptr)
         }
     }
 }
@@ -285,7 +262,7 @@ pub struct SlabAllocator<'a> {
     /// Allocation size.
     size: usize,
     /// Memory backing store, to request new SlabPages.
-    pager: &'a SlabPageProvider<'a>,
+    pager: Option<&'a mut SlabPageProvider<'a>>,
     /// List of SlabPages.
     slabs: SlabList<'a>,
 }
@@ -293,7 +270,7 @@ pub struct SlabAllocator<'a> {
 impl<'a> SlabAllocator<'a> {
 
     /// Create a new SlabAllocator.
-    pub fn new<'b>(size: usize, pager: &'a SlabPageProvider<'a>) -> SlabAllocator<'a> {
+    pub fn new(size: usize, pager: Option<&'a mut SlabPageProvider<'a>>) -> SlabAllocator<'a> {
         SlabAllocator{
             size: size,
             pager: pager,
@@ -314,12 +291,15 @@ impl<'a> SlabAllocator<'a> {
     /// # TODO
     /// * `amount` is currently ignored
     fn refill_slab<'b>(&'b mut self, amount: usize) {
-        match self.pager.allocate_slabpage() {
-            Some(new_head) => {
-                self.slabs.insert_front(new_head);
-            },
-            None => panic!("OOM")
-        }
+        self.pager.take().map(|p| {
+            match p.allocate_slabpage() {
+                Some(new_head) => {
+                    self.slabs.insert_front(new_head);
+                    self.pager = Some(p);
+                },
+                None => panic!("OOM")
+            }
+        });
     }
 
     /// Tries to allocate a block of memory with respect to the `alignment`.
@@ -364,7 +344,9 @@ impl<'a> SlabAllocator<'a> {
 
         if slab_page.is_empty() {
             self.slabs.remove_from_list(slab_page);
-            self.pager.release_slabpage(slab_page);
+            self.pager.as_mut().map(move |p| {
+                p.release_slabpage(slab_page);
+            });
         }
     }
 

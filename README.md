@@ -10,7 +10,7 @@ needs to provide is the  necessary mechanism to allocate and free 4KiB frames
 
 * Use the ZoneAllocator to allocate arbitrary sized objects:
 ```rust
-let mut mmap = MmapSlabAllocator::new();
+let mut mmap = MmapPageProvider::new();
 let mut zone: ZoneAllocator = ZoneAllocator::new(&mmap);
 let object_size = 12;
 let alignment = 4;
