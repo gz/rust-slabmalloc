@@ -45,24 +45,30 @@
             <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
                 [<span class='inner'>&#x2212;</span>]
             </a>
-        </span><a id='src-721' class='srclink' href='../src/slabmalloc/lib.rs.html#284-291' title='goto source code'>[src]</a></span></h1>
+        </span><a id='src-752' class='srclink' href='../src/slabmalloc/lib.rs.html#286-293' title='goto source code'>[src]</a></span></h1>
 <pre class='rust struct'>pub struct SlabAllocator&lt;'a&gt; {
     // some fields omitted
 }</pre><div class='docblock'><p>A slab allocator allocates elements of a fixed size.</p>
 
 <p>It has a list of SlabPages stored inside <code>slabs</code> from which
 it allocates memory.</p>
-</div><h2 id='methods'>Methods</h2><h3 class='impl'><code>impl&lt;'a&gt; <a class='struct' href='../slabmalloc/struct.SlabAllocator.html' title='slabmalloc::SlabAllocator'>SlabAllocator</a>&lt;'a&gt;</code></h3><div class='impl-items'><h4 id='method.new' class='method'><code>fn <a href='#method.new' class='fnname'>new</a>&lt;'b&gt;(size: <a href='http://doc.rust-lang.org/nightly/core/primitive.usize.html'>usize</a>, pager: &amp;'a <a class='trait' href='../slabmalloc/trait.SlabPageProvider.html' title='slabmalloc::SlabPageProvider'>SlabPageProvider</a>&lt;'a&gt;) -&gt; <a class='struct' href='../slabmalloc/struct.SlabAllocator.html' title='slabmalloc::SlabAllocator'>SlabAllocator</a>&lt;'a&gt;</code></h4>
+</div><h2 id='methods'>Methods</h2><h3 class='impl'><code>impl&lt;'a&gt; <a class='struct' href='../slabmalloc/struct.SlabAllocator.html' title='slabmalloc::SlabAllocator'>SlabAllocator</a>&lt;'a&gt;</code></h3><div class='impl-items'><h4 id='method.new' class='method'><code>fn <a href='#method.new' class='fnname'>new</a>(size: <a href='http://doc.rust-lang.org/nightly/core/primitive.usize.html'>usize</a>, pager: <a class='enum' href='http://doc.rust-lang.org/nightly/core/option/enum.Option.html' title='core::option::Option'>Option</a>&lt;&amp;'a mut <a class='trait' href='../slabmalloc/trait.SlabPageProvider.html' title='slabmalloc::SlabPageProvider'>SlabPageProvider</a>&lt;'a&gt;&gt;) -&gt; <a class='struct' href='../slabmalloc/struct.SlabAllocator.html' title='slabmalloc::SlabAllocator'>SlabAllocator</a>&lt;'a&gt;</code></h4>
 <div class='docblock'><p>Create a new SlabAllocator.</p>
 </div><h4 id='method.size' class='method'><code>fn <a href='#method.size' class='fnname'>size</a>(&amp;self) -&gt; <a href='http://doc.rust-lang.org/nightly/core/primitive.usize.html'>usize</a></code></h4>
 <div class='docblock'><p>Return object size of this allocator.</p>
+</div><h4 id='method.insert_slab' class='method'><code>fn <a href='#method.insert_slab' class='fnname'>insert_slab</a>&lt;'b&gt;(&amp;'b mut self, new_head: &amp;'a mut <a class='struct' href='../slabmalloc/struct.SlabPage.html' title='slabmalloc::SlabPage'>SlabPage</a>&lt;'a&gt;)</code></h4>
+<div class='docblock'><p>Add a new SlabPage.</p>
 </div><h4 id='method.allocate' class='method'><code>fn <a href='#method.allocate' class='fnname'>allocate</a>&lt;'b&gt;(&amp;'b mut self, alignment: <a href='http://doc.rust-lang.org/nightly/core/primitive.usize.html'>usize</a>) -&gt; <a class='enum' href='http://doc.rust-lang.org/nightly/core/option/enum.Option.html' title='core::option::Option'>Option</a>&lt;<a href='http://doc.rust-lang.org/nightly/core/primitive.pointer.html'>*mut <a href='http://doc.rust-lang.org/nightly/core/primitive.u8.html'>u8</a></a>&gt;</code></h4>
 <div class='docblock'><p>Allocates a block of memory with respect to <code>alignment</code>.</p>
 
 <p>In case of failure will try to grow the slab allocator by requesting
-additional pages.</p>
+additional pages and re-try the allocation once more before we give up.</p>
 </div><h4 id='method.deallocate' class='method'><code>fn <a href='#method.deallocate' class='fnname'>deallocate</a>&lt;'b&gt;(&amp;'b mut self, ptr: <a href='http://doc.rust-lang.org/nightly/core/primitive.pointer.html'>*mut <a href='http://doc.rust-lang.org/nightly/core/primitive.u8.html'>u8</a></a>)</code></h4>
 <div class='docblock'><p>Deallocates a previously allocated block.</p>
+
+<h1 id="bug" class='section-header'><a
+                           href="#bug">Bug</a></h1>
+<p>This never releases memory in case the SlabPages are provided by the zone.</p>
 </div></div></section>
     <section id='search' class="content hidden"></section>
 

@@ -577,6 +577,27 @@
 <span id="535">535</span>
 <span id="536">536</span>
 <span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
 </pre><pre class='rust '>
 <span class='doccomment'>//! A slab allocator implementation for small objects</span>
 <span class='doccomment'>//! (&lt; architecture page size).</span>
@@ -603,6 +624,7 @@
 <span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>std</span>;
 <span class='attribute'>#[<span class='ident'>cfg</span>(<span class='ident'>test</span>)]</span>
 <span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>test</span>;
+
 
 <span class='attribute'>#[<span class='ident'>cfg</span>(<span class='ident'>test</span>)]</span>
 <span class='attribute'>#[<span class='ident'>prelude_import</span>]</span>
@@ -636,8 +658,8 @@
 <span class='doccomment'>/// has to provide this interface and stick an implementation of it</span>
 <span class='doccomment'>/// into every SlabAllocator.</span>
 <span class='kw'>pub</span> <span class='kw'>trait</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
-    <span class='kw'>fn</span> <span class='ident'>allocate_slabpage</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPage</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;&gt;</span>;
-    <span class='kw'>fn</span> <span class='ident'>release_slabpage</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPage</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>);
+    <span class='kw'>fn</span> <span class='ident'>allocate_slabpage</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPage</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;&gt;</span>;
+    <span class='kw'>fn</span> <span class='ident'>release_slabpage</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPage</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>);
 }
 
 <span class='doccomment'>/// A zone allocator.</span>
@@ -646,61 +668,43 @@
 <span class='doccomment'>/// allocation requests for many different (MAX_SLABS) object sizes</span>
 <span class='doccomment'>/// (by selecting the right slab allocator).</span>
 <span class='kw'>pub</span> <span class='kw'>struct</span> <span class='ident'>ZoneAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
-    <span class='ident'>slabs</span>: [<span class='ident'>SlabAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>; <span class='ident'>MAX_SLABS</span>]
+    <span class='ident'>pager</span>: <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;&gt;</span>,
+    <span class='ident'>slabs</span>: [<span class='ident'>SlabAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>; <span class='ident'>MAX_SLABS</span>],
 }
 
 <span class='kw'>impl</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> <span class='ident'>ZoneAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>{
 
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span>(<span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>) <span class='op'>-&gt;</span> <span class='ident'>ZoneAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span>(<span class='ident'>pager</span>: <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;&gt;</span>) <span class='op'>-&gt;</span> <span class='ident'>ZoneAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
         <span class='ident'>ZoneAllocator</span>{
+            <span class='ident'>pager</span>: <span class='ident'>pager</span>,
             <span class='ident'>slabs</span>: [
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>8</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>16</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>32</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>64</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>128</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>256</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>512</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>1024</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>2048</span>, <span class='ident'>pager</span>),
-                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>4032</span>, <span class='ident'>pager</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>8</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>16</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>32</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>64</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>128</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>256</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>512</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>1024</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>2048</span>, <span class='prelude-val'>None</span>),
+                <span class='ident'>SlabAllocator</span>::<span class='ident'>new</span>(<span class='number'>4032</span>, <span class='prelude-val'>None</span>),
             ]
         }
     }
 
-    <span class='doccomment'>/// Round-up the requested size to fit one of the slab allocators.</span>
-    <span class='doccomment'>///</span>
-    <span class='doccomment'>/// Returns the size of the nearest size class that fits `requested_size`</span>
-    <span class='doccomment'>/// or None in case allocation size is too big (i.e., large than a page).</span>
-    <span class='kw'>fn</span> <span class='ident'>get_size_class</span>(<span class='ident'>requested_size</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='ident'>usize</span><span class='op'>&gt;</span> {
-        <span class='kw'>match</span> <span class='ident'>requested_size</span> {
-            <span class='number'>0</span>...<span class='number'>8</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>8</span>),
-            <span class='number'>9</span>...<span class='number'>16</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>16</span>),
-            <span class='number'>17</span>...<span class='number'>32</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>32</span>),
-            <span class='number'>33</span>...<span class='number'>64</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>64</span>),
-            <span class='number'>65</span>...<span class='number'>128</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>128</span>),
-            <span class='number'>129</span>...<span class='number'>256</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>256</span>),
-            <span class='number'>257</span>...<span class='number'>512</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>512</span>),
-            <span class='number'>513</span>...<span class='number'>1024</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>1024</span>),
-            <span class='number'>1025</span>...<span class='number'>2048</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>2048</span>),
-            <span class='number'>2049</span>...<span class='number'>4032</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>4032</span>),
-            _ <span class='op'>=&gt;</span> <span class='prelude-val'>None</span>,
-        }
-    }
-
     <span class='doccomment'>/// Figure out index into zone array to get the correct slab allocator for that size.</span>
-    <span class='kw'>fn</span> <span class='ident'>get_slab_idx</span>(<span class='ident'>size_class</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='ident'>usize</span><span class='op'>&gt;</span> {
-        <span class='kw'>match</span> <span class='ident'>size_class</span> {
-            <span class='number'>8</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>0</span>),
-            <span class='number'>16</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>1</span>),
-            <span class='number'>32</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>2</span>),
-            <span class='number'>64</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>3</span>),
-            <span class='number'>128</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>4</span>),
-            <span class='number'>256</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>5</span>),
-            <span class='number'>512</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>6</span>),
-            <span class='number'>1024</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>7</span>),
-            <span class='number'>2048</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>8</span>),
-            <span class='number'>4032</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>9</span>),
+    <span class='kw'>fn</span> <span class='ident'>get_slab_idx</span>(<span class='ident'>requested_size</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='ident'>usize</span><span class='op'>&gt;</span> {
+        <span class='kw'>match</span> <span class='ident'>requested_size</span> {
+            <span class='number'>0</span>...<span class='number'>8</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>0</span>),
+            <span class='number'>9</span>...<span class='number'>16</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>1</span>),
+            <span class='number'>17</span>...<span class='number'>32</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>2</span>),
+            <span class='number'>33</span>...<span class='number'>64</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>3</span>),
+            <span class='number'>65</span>...<span class='number'>128</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>4</span>),
+            <span class='number'>129</span>...<span class='number'>256</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>5</span>),
+            <span class='number'>257</span>...<span class='number'>512</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>6</span>),
+            <span class='number'>513</span>...<span class='number'>1024</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>7</span>),
+            <span class='number'>1025</span>...<span class='number'>2048</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>8</span>),
+            <span class='number'>2049</span>...<span class='number'>4032</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='number'>9</span>),
             _ <span class='op'>=&gt;</span> <span class='prelude-val'>None</span>,
         }
     }
@@ -711,27 +715,46 @@
     <span class='doccomment'>/// the requested allocation size can not be satisfied by</span>
     <span class='doccomment'>/// any of the available slabs.</span>
     <span class='kw'>fn</span> <span class='ident'>try_acquire_slab</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>size</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='ident'>usize</span><span class='op'>&gt;</span> {
-        <span class='kw'>match</span> <span class='ident'>ZoneAllocator</span>::<span class='ident'>get_size_class</span>(<span class='ident'>size</span>) {
-            <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>None</span>,
-            <span class='prelude-val'>Some</span>(<span class='ident'>size_class</span>) <span class='op'>=&gt;</span> <span class='kw'>match</span> <span class='ident'>ZoneAllocator</span>::<span class='ident'>get_slab_idx</span>(<span class='ident'>size_class</span>) {
-                <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>None</span>,
-                <span class='prelude-val'>Some</span>(<span class='ident'>idx</span>) <span class='op'>=&gt;</span> {
-                    <span class='kw'>if</span> <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>size</span> <span class='op'>==</span> <span class='number'>0</span> {
-                        <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>size</span> <span class='op'>=</span> <span class='ident'>size_class</span>;
-                    }
-                    <span class='prelude-val'>Some</span>(<span class='ident'>idx</span>)
-                }
+        <span class='ident'>ZoneAllocator</span>::<span class='ident'>get_slab_idx</span>(<span class='ident'>size</span>).<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>idx</span><span class='op'>|</span> {
+            <span class='kw'>if</span> <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>size</span> <span class='op'>==</span> <span class='number'>0</span> {
+                <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>size</span> <span class='op'>=</span> <span class='ident'>size</span>;
             }
-        }
+            <span class='ident'>idx</span>
+        })
+    }
+
+    <span class='doccomment'>/// Refills the SlabAllocator in slabs at `idx` with a SlabPage.</span>
+    <span class='doccomment'>///</span>
+    <span class='doccomment'>/// # TODO</span>
+    <span class='doccomment'>///  * Panics in case we&#39;re OOM (should probably return error).</span>
+    <span class='kw'>fn</span> <span class='ident'>refill_slab_allocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;b</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>idx</span>: <span class='ident'>usize</span>) {
+        <span class='self'>self</span>.<span class='ident'>pager</span>.<span class='ident'>take</span>().<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>p</span><span class='op'>|</span> {
+            <span class='kw'>match</span> <span class='ident'>p</span>.<span class='ident'>allocate_slabpage</span>() {
+                <span class='prelude-val'>Some</span>(<span class='ident'>new_head</span>) <span class='op'>=&gt;</span> {
+                    <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>insert_slab</span>(<span class='ident'>new_head</span>);
+                    <span class='self'>self</span>.<span class='ident'>pager</span> <span class='op'>=</span> <span class='prelude-val'>Some</span>(<span class='ident'>p</span>);
+                },
+                <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;OOM&quot;</span>)
+            }
+        });
     }
 
     <span class='doccomment'>/// Allocate a pointer to a block of memory of size `size` with alignment `align`.</span>
     <span class='doccomment'>///</span>
-    <span class='doccomment'>/// Returns None in case the zone allocator can not satisfy the allocation</span>
-    <span class='doccomment'>/// of the requested size.</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>allocate</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>size</span>: <span class='ident'>usize</span>, <span class='ident'>align</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span><span class='op'>&gt;</span> {
+    <span class='doccomment'>/// Can return None in case the zone allocator can not satisfy the allocation</span>
+    <span class='doccomment'>/// of the requested size or if we do not have enough memory.</span>
+    <span class='doccomment'>/// In case we are out of memory we try to refill the slab using our local pager</span>
+    <span class='doccomment'>/// and re-try the allocation request once more before we give up.</span>
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>allocate</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;b</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>size</span>: <span class='ident'>usize</span>, <span class='ident'>align</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span><span class='op'>&gt;</span> {
         <span class='kw'>match</span> <span class='self'>self</span>.<span class='ident'>try_acquire_slab</span>(<span class='ident'>size</span>) {
-            <span class='prelude-val'>Some</span>(<span class='ident'>idx</span>) <span class='op'>=&gt;</span> <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>allocate</span>(<span class='ident'>align</span>),
+            <span class='prelude-val'>Some</span>(<span class='ident'>idx</span>) <span class='op'>=&gt;</span> {
+                <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>p</span> <span class='op'>=</span> <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>allocate</span>(<span class='ident'>align</span>);
+                <span class='kw'>if</span> <span class='ident'>p</span>.<span class='ident'>is_none</span>() {
+                    <span class='self'>self</span>.<span class='ident'>refill_slab_allocator</span>(<span class='ident'>idx</span>);
+                    <span class='ident'>p</span> <span class='op'>=</span> <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>allocate</span>(<span class='ident'>align</span>);
+                }
+                <span class='kw'>return</span> <span class='ident'>p</span>;
+            },
             <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>None</span>
         }
     }
@@ -743,10 +766,10 @@
     <span class='doccomment'>///  * `old_size` - Size of the block.</span>
     <span class='doccomment'>///  * `align` - Alignment of the block.</span>
     <span class='doccomment'>///</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>deallocate</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>ptr</span>: <span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span>, <span class='ident'>old_size</span>: <span class='ident'>usize</span>, <span class='ident'>align</span>: <span class='ident'>usize</span>) {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>deallocate</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;b</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>ptr</span>: <span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span>, <span class='ident'>old_size</span>: <span class='ident'>usize</span>, <span class='ident'>align</span>: <span class='ident'>usize</span>) {
         <span class='kw'>match</span> <span class='self'>self</span>.<span class='ident'>try_acquire_slab</span>(<span class='ident'>old_size</span>) {
             <span class='prelude-val'>Some</span>(<span class='ident'>idx</span>) <span class='op'>=&gt;</span> <span class='self'>self</span>.<span class='ident'>slabs</span>[<span class='ident'>idx</span>].<span class='ident'>deallocate</span>(<span class='ident'>ptr</span>),
-            <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Unable to find slab allocator for size ({}) with ptr {:?}&quot;</span>, <span class='ident'>old_size</span>, <span class='ident'>ptr</span>)
+            <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Unable to find slab allocator for size ({}) with ptr {:?}.&quot;</span>, <span class='ident'>old_size</span>, <span class='ident'>ptr</span>)
         }
     }
 }
@@ -865,7 +888,7 @@
     <span class='doccomment'>/// Allocation size.</span>
     <span class='ident'>size</span>: <span class='ident'>usize</span>,
     <span class='doccomment'>/// Memory backing store, to request new SlabPages.</span>
-    <span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>,
+    <span class='ident'>pager</span>: <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;&gt;</span>,
     <span class='doccomment'>/// List of SlabPages.</span>
     <span class='ident'>slabs</span>: <span class='ident'>SlabList</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>,
 }
@@ -873,7 +896,7 @@
 <span class='kw'>impl</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> <span class='ident'>SlabAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
 
     <span class='doccomment'>/// Create a new SlabAllocator.</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='ident'>size</span>: <span class='ident'>usize</span>, <span class='ident'>pager</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>) <span class='op'>-&gt;</span> <span class='ident'>SlabAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span>(<span class='ident'>size</span>: <span class='ident'>usize</span>, <span class='ident'>pager</span>: <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPageProvider</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;&gt;</span>) <span class='op'>-&gt;</span> <span class='ident'>SlabAllocator</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span> {
         <span class='ident'>SlabAllocator</span>{
             <span class='ident'>size</span>: <span class='ident'>size</span>,
             <span class='ident'>pager</span>: <span class='ident'>pager</span>,
@@ -886,20 +909,26 @@
         <span class='self'>self</span>.<span class='ident'>size</span>
     }
 
-    <span class='doccomment'>/// Allocate a new SlabPage and insert it.</span>
-    <span class='doccomment'>///</span>
-    <span class='doccomment'>/// # Panic</span>
-    <span class='doccomment'>/// * In case we run out of memory in the `pager`.</span>
+    <span class='doccomment'>/// Try to allocate a new SlabPage and insert it.</span>
     <span class='doccomment'>///</span>
     <span class='doccomment'>/// # TODO</span>
-    <span class='doccomment'>/// * `amount` is currently ignored</span>
+    <span class='doccomment'>///  * Amount is currently ignored.</span>
+    <span class='doccomment'>///  * Panics on OOM (should return error!)</span>
     <span class='kw'>fn</span> <span class='ident'>refill_slab</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;b</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>amount</span>: <span class='ident'>usize</span>) {
-        <span class='kw'>match</span> <span class='self'>self</span>.<span class='ident'>pager</span>.<span class='ident'>allocate_slabpage</span>() {
-            <span class='prelude-val'>Some</span>(<span class='ident'>new_head</span>) <span class='op'>=&gt;</span> {
-                <span class='self'>self</span>.<span class='ident'>slabs</span>.<span class='ident'>insert_front</span>(<span class='ident'>new_head</span>);
-            },
-            <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;OOM&quot;</span>)
-        }
+        <span class='self'>self</span>.<span class='ident'>pager</span>.<span class='ident'>take</span>().<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>p</span><span class='op'>|</span> {
+            <span class='kw'>match</span> <span class='ident'>p</span>.<span class='ident'>allocate_slabpage</span>() {
+                <span class='prelude-val'>Some</span>(<span class='ident'>new_head</span>) <span class='op'>=&gt;</span> {
+                    <span class='self'>self</span>.<span class='ident'>insert_slab</span>(<span class='ident'>new_head</span>);
+                    <span class='self'>self</span>.<span class='ident'>pager</span> <span class='op'>=</span> <span class='prelude-val'>Some</span>(<span class='ident'>p</span>);
+                },
+                <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;OOM&quot;</span>)
+            }
+        });
+    }
+
+    <span class='doccomment'>/// Add a new SlabPage.</span>
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>insert_slab</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;b</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>new_head</span>: <span class='kw-2'>&amp;</span><span class='lifetime'>&#39;a</span> <span class='kw-2'>mut</span> <span class='ident'>SlabPage</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>) {
+        <span class='self'>self</span>.<span class='ident'>slabs</span>.<span class='ident'>insert_front</span>(<span class='ident'>new_head</span>);
     }
 
     <span class='doccomment'>/// Tries to allocate a block of memory with respect to the `alignment`.</span>
@@ -923,17 +952,28 @@
     <span class='doccomment'>/// Allocates a block of memory with respect to `alignment`.</span>
     <span class='doccomment'>///</span>
     <span class='doccomment'>/// In case of failure will try to grow the slab allocator by requesting</span>
-    <span class='doccomment'>/// additional pages.</span>
+    <span class='doccomment'>/// additional pages and re-try the allocation once more before we give up.</span>
     <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>allocate</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;b</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>alignment</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span><span class='op'>&gt;</span> {
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='self'>self</span>.<span class='ident'>size</span> <span class='op'>&lt;</span> (<span class='ident'>BASE_PAGE_SIZE</span> <span class='kw'>as</span> <span class='ident'>usize</span> <span class='op'>-</span> <span class='ident'>CACHE_LINE_SIZE</span>));
 
         <span class='kw'>match</span> <span class='self'>self</span>.<span class='ident'>allocate_in_existing_slabs</span>(<span class='ident'>alignment</span>) {
-            <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> { <span class='self'>self</span>.<span class='ident'>refill_slab</span>(<span class='number'>1</span>); <span class='kw'>return</span> <span class='self'>self</span>.<span class='ident'>allocate</span>(<span class='ident'>alignment</span>); },
+            <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> {
+                <span class='kw'>if</span> <span class='self'>self</span>.<span class='ident'>pager</span>.<span class='ident'>is_some</span>() {
+                    <span class='self'>self</span>.<span class='ident'>refill_slab</span>(<span class='number'>1</span>);
+                    <span class='kw'>return</span> <span class='self'>self</span>.<span class='ident'>allocate</span>(<span class='ident'>alignment</span>);
+                }
+                <span class='kw'>else</span> {
+                    <span class='kw'>return</span> <span class='prelude-val'>None</span>;
+                }
+            },
             <span class='prelude-val'>Some</span>(<span class='ident'>obj</span>) <span class='op'>=&gt;</span> <span class='kw'>return</span> <span class='prelude-val'>Some</span>(<span class='ident'>obj</span>),
         }
     }
 
     <span class='doccomment'>/// Deallocates a previously allocated block.</span>
+    <span class='doccomment'>///</span>
+    <span class='doccomment'>/// # Bug</span>
+    <span class='doccomment'>/// This never releases memory in case the SlabPages are provided by the zone.</span>
     <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>deallocate</span><span class='op'>&lt;</span><span class='lifetime'>&#39;b</span><span class='op'>&gt;</span>(<span class='kw-2'>&amp;</span><span class='lifetime'>&#39;b</span> <span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>ptr</span>: <span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span>) {
         <span class='kw'>let</span> <span class='ident'>page</span> <span class='op'>=</span> (<span class='ident'>ptr</span> <span class='kw'>as</span> <span class='ident'>usize</span>) <span class='kw-2'>&amp;</span> <span class='op'>!</span>(<span class='ident'>BASE_PAGE_SIZE</span><span class='op'>-</span><span class='number'>1</span>) <span class='kw'>as</span> <span class='ident'>usize</span>;
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>slab_page</span> <span class='op'>=</span> <span class='kw'>unsafe</span> {
@@ -944,7 +984,9 @@
 
         <span class='kw'>if</span> <span class='ident'>slab_page</span>.<span class='ident'>is_empty</span>() {
             <span class='self'>self</span>.<span class='ident'>slabs</span>.<span class='ident'>remove_from_list</span>(<span class='ident'>slab_page</span>);
-            <span class='self'>self</span>.<span class='ident'>pager</span>.<span class='ident'>release_slabpage</span>(<span class='ident'>slab_page</span>);
+            <span class='self'>self</span>.<span class='ident'>pager</span>.<span class='ident'>as_mut</span>().<span class='ident'>map</span>(<span class='kw'>move</span> <span class='op'>|</span><span class='ident'>p</span><span class='op'>|</span> {
+                <span class='ident'>p</span>.<span class='ident'>release_slabpage</span>(<span class='ident'>slab_page</span>);
+            });
         }
     }
 
