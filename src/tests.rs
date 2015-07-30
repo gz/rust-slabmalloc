@@ -192,20 +192,25 @@ fn invalid_alignment() {
     sa.allocate(3);
 }
 
-//#[test]
+#[test]
 fn test_readme() {
     let object_size = 12;
     let alignment = 4;
-
     let mut mmap = MmapPageProvider::new();
     let mut zone = ZoneAllocator::new(Some(&mut mmap));
 
-    match zone.allocate(object_size, alignment) {
-        Some(ptr) => {
-            zone.deallocate(ptr, object_size, alignment)
-        }
-        None => println!("unable to alloc"),
-    };
+
+    let allocated = zone.allocate(object_size, alignment);
+    allocated.map(|ptr| { zone.deallocate(ptr, object_size, alignment) });
+}
+
+#[test]
+fn test_readme2() {
+    let object_size = 10;
+    let alignment = 8;
+    let mut mmap = MmapPageProvider::new();
+    let mut sa: SlabAllocator = SlabAllocator::new(object_size, Some(&mut mmap));
+    sa.allocate(alignment);
 }
 
 #[bench]

@@ -122,13 +122,38 @@ impl<'a> ZoneAllocator<'a>{
         })
     }
 
+    /// Refills the SlabAllocator in slabs at `idx` with a SlabPage.
+    ///
+    /// # TODO
+    ///  * Panics in case we're OOM (should probably return error).
+    fn refill_slab_allocator<'b>(&'b mut self, idx: usize) {
+        self.pager.take().map(|p| {
+            match p.allocate_slabpage() {
+                Some(new_head) => {
+                    self.slabs[idx].insert_slab(new_head);
+                    self.pager = Some(p);
+                },
+                None => panic!("OOM")
+            }
+        });
+    }
+
     /// Allocate a pointer to a block of memory of size `size` with alignment `align`.
     ///
-    /// Returns None in case the zone allocator can not satisfy the allocation
-    /// of the requested size.
+    /// Can return None in case the zone allocator can not satisfy the allocation
+    /// of the requested size or if we do not have enough memory.
+    /// In case we are out of memory we try to refill the slab using our local pager
+    /// and re-try the allocation request once more before we give up.
     pub fn allocate<'b>(&'b mut self, size: usize, align: usize) -> Option<*mut u8> {
         match self.try_acquire_slab(size) {
-            Some(idx) => self.slabs[idx].allocate(align),
+            Some(idx) => {
+                let mut p = self.slabs[idx].allocate(align);
+                if p.is_none() {
+                    self.refill_slab_allocator(idx);
+                    p = self.slabs[idx].allocate(align);
+                }
+                return p;
+            },
             None => None
         }
     }
@@ -283,23 +308,26 @@ impl<'a> SlabAllocator<'a> {
         self.size
     }
 
-    /// Allocate a new SlabPage and insert it.
-    ///
-    /// # Panic
-    /// * In case we run out of memory in the `pager`.
+    /// Try to allocate a new SlabPage and insert it.
     ///
     /// # TODO
-    /// * `amount` is currently ignored
+    ///  * Amount is currently ignored.
+    ///  * Panics on OOM (should return error!)
     fn refill_slab<'b>(&'b mut self, amount: usize) {
         self.pager.take().map(|p| {
             match p.allocate_slabpage() {
                 Some(new_head) => {
-                    self.slabs.insert_front(new_head);
+                    self.insert_slab(new_head);
                     self.pager = Some(p);
                 },
                 None => panic!("OOM")
             }
         });
+    }
+
+    /// Add a new SlabPage.
+    pub fn insert_slab<'b>(&'b mut self, new_head: &'a mut SlabPage<'a>) {
+        self.slabs.insert_front(new_head);
     }
 
     /// Tries to allocate a block of memory with respect to the `alignment`.
@@ -323,17 +351,28 @@ impl<'a> SlabAllocator<'a> {
     /// Allocates a block of memory with respect to `alignment`.
     ///
     /// In case of failure will try to grow the slab allocator by requesting
-    /// additional pages.
+    /// additional pages and re-try the allocation once more before we give up.
     pub fn allocate<'b>(&'b mut self, alignment: usize) -> Option<*mut u8> {
         assert!(self.size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
 
         match self.allocate_in_existing_slabs(alignment) {
-            None => { self.refill_slab(1); return self.allocate(alignment); },
+            None => {
+                if self.pager.is_some() {
+                    self.refill_slab(1);
+                    return self.allocate(alignment);
+                }
+                else {
+                    return None;
+                }
+            },
             Some(obj) => return Some(obj),
         }
     }
 
     /// Deallocates a previously allocated block.
+    ///
+    /// # Bug
+    /// This never releases memory in case the SlabPages are provided by the zone.
     pub fn deallocate<'b>(&'b mut self, ptr: *mut u8) {
         let page = (ptr as usize) & !(BASE_PAGE_SIZE-1) as usize;
         let mut slab_page = unsafe {

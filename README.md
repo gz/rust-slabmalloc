@@ -10,23 +10,22 @@ needs to provide is the  necessary mechanism to allocate and free 4KiB frames
 
 * Use the ZoneAllocator to allocate arbitrary sized objects:
 ```rust
-let mut mmap = MmapPageProvider::new();
-let mut zone: ZoneAllocator = ZoneAllocator::new(&mmap);
 let object_size = 12;
 let alignment = 4;
+let mut mmap = MmapPageProvider::new();
+let mut zone = ZoneAllocator::new(Some(&mut mmap));
 
-match zone.allocate(object_size, alignment) {
-    None => println!("Out of memory..."),
-    Some(ptr) => zone.deallocate(ptr, object_size, alignment),
-}
+
+let allocated = zone.allocate(object_size, alignment);
+allocated.map(|ptr| { zone.deallocate(ptr, object_size, alignment) });
 ```
 
 * Use the SlabAllocator to allocate fixed sized objects:
 ```rust
 let object_size = 10;
 let alignment = 8;
-let mmap = MmapSlabAllocator::new();
-let mut sa: SlabAllocator = SlabAllocator::new(object_size, &mmap);
+let mut mmap = MmapPageProvider::new();
+let mut sa: SlabAllocator = SlabAllocator::new(object_size, Some(&mut mmap));
 sa.allocate(alignment);
 ```
 
