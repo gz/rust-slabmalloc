@@ -12,7 +12,7 @@
 //!    SlabAllocator to allocate SlabPages.
 //!
 #![allow(unused_features, dead_code, unused_variables)]
-#![feature(prelude_import, test, no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
+#![feature(const_fn, prelude_import, test, no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
 #![no_std]
 
 #![crate_name = "slabmalloc"]
@@ -73,7 +73,7 @@ pub struct ZoneAllocator<'a> {
 
 impl<'a> ZoneAllocator<'a>{
 
-    pub fn new(pager: Option<&'a mut SlabPageProvider<'a>>) -> ZoneAllocator<'a> {
+    pub const fn new(pager: Option<&'a mut SlabPageProvider<'a>>) -> ZoneAllocator<'a> {
         ZoneAllocator{
             pager: pager,
             slabs: [
@@ -183,7 +183,7 @@ struct SlabList<'a> {
 
 impl<'a> SlabList<'a> {
 
-    fn new() -> SlabList<'a> {
+    const fn new() -> SlabList<'a> {
         SlabList{ head: None, elements: 0 }
     }
 
@@ -295,7 +295,7 @@ pub struct SlabAllocator<'a> {
 impl<'a> SlabAllocator<'a> {
 
     /// Create a new SlabAllocator.
-    pub fn new(size: usize, pager: Option<&'a mut SlabPageProvider<'a>>) -> SlabAllocator<'a> {
+    pub const fn new(size: usize, pager: Option<&'a mut SlabPageProvider<'a>>) -> SlabAllocator<'a> {
         SlabAllocator{
             size: size,
             pager: pager,
