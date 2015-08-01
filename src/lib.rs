@@ -91,6 +91,25 @@ impl<'a> ZoneAllocator<'a>{
         }
     }
 
+    /// Return maximum size an object of size `current_size` can use.
+    ///
+    /// Used to optimize `realloc`.
+    fn get_max_size(current_size: usize) -> Option<usize> {
+        match current_size {
+            0...8 => Some(8),
+            9...16 => Some(16),
+            17...32 => Some(32),
+            33...64 => Some(64),
+            65...128 => Some(128),
+            129...256 => Some(256),
+            257...512 => Some(512),
+            513...1024 => Some(1024),
+            1025...2048 => Some(2048),
+            2049...4032 => Some(4032),
+            _ => None,
+        }
+    }
+
     /// Figure out index into zone array to get the correct slab allocator for that size.
     fn get_slab_idx(requested_size: usize) -> Option<usize> {
         match requested_size {
@@ -171,6 +190,37 @@ impl<'a> ZoneAllocator<'a>{
             None => panic!("Unable to find slab allocator for size ({}) with ptr {:?}.", old_size, ptr)
         }
     }
+
+    unsafe fn copy(dest: *mut u8, src: *const u8, n: usize) {
+        let mut i = 0;
+        while i < n {
+            *dest.offset(i as isize) = *src.offset(i as isize);
+            i += 1;
+        }
+    }
+
+    pub fn reallocate<'b>(&'b mut self, ptr: *mut u8, old_size: usize, size: usize, align: usize) -> Option<*mut u8> {
+        // Return immediately in case we can still fit the new request in the current buffer
+        match ZoneAllocator::get_max_size(old_size) {
+            Some(max_size) => {
+                if max_size >= size {
+                    return Some(ptr);
+                }
+                ()
+            },
+            None => ()
+        };
+
+        // Otherwise allocate, copy, free:
+        self.allocate(size, align).map(|new| {
+            unsafe {
+                ZoneAllocator::copy(new, ptr, old_size);
+            }
+            self.deallocate(ptr, old_size, align);
+            new
+        })
+    }
+
 }
 
 /// A list of SlabPages.
