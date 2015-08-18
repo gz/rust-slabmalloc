@@ -11,9 +11,11 @@
 //!  * A `SlabPageProvider` is provided by the client and used by the
 //!    SlabAllocator to allocate SlabPages.
 //!
+#![feature(allocator)]
 #![allow(unused_features, dead_code, unused_variables)]
 #![feature(const_fn, prelude_import, test, no_std, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
 #![no_std]
+#![allocator]
 
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
@@ -29,10 +31,6 @@ extern crate test;
 #[prelude_import]
 use std::prelude::v1::*;
 
-#[macro_use]
-extern crate core;
-#[cfg(not(test))]
-use core::prelude::*;
 use core::mem;
 use core::ptr;
 use core::fmt;
