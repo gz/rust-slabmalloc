@@ -36,9 +36,13 @@ use core::ptr;
 use core::fmt;
 
 #[cfg(target_arch="x86_64")]
-extern crate x86;
+const CACHE_LINE_SIZE: usize = 64;
+
 #[cfg(target_arch="x86_64")]
-use x86::paging::{VAddr, CACHE_LINE_SIZE, BASE_PAGE_SIZE};
+const BASE_PAGE_SIZE: usize = 4096;
+
+#[cfg(target_arch="x86_64")]
+type VAddr = usize;
 
 #[cfg(test)]
 extern crate libc;
