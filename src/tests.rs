@@ -4,11 +4,9 @@ use libc;
 use rand;
 use std::mem::size_of;
 
-// The types we want to test:
-use super::{ZoneAllocator, SlabPage, SlabAllocator, SlabPageProvider};
 
-#[cfg(target_arch="x86_64")]
-use x86::paging::{BASE_PAGE_SIZE};
+// The types we want to test:
+use super::{ZoneAllocator, SlabPage, SlabAllocator, SlabPageProvider, BASE_PAGE_SIZE};
 
 use test::Bencher;
 
@@ -36,7 +34,7 @@ impl<'a> SlabPageProvider<'a> for MmapPageProvider {
     /// Uses `mmap` to map a page and casts it to a SlabPage.
     fn allocate_slabpage(&mut self) -> Option<&'a mut SlabPage<'a>> {
         let mut addr: libc::c_void = libc::c_void::__variant1;
-        let len: libc::size_t = BASE_PAGE_SIZE;
+        let len: libc::size_t = BASE_PAGE_SIZE as u64;
         let prot = libc::PROT_READ | libc::PROT_WRITE;
         let flags = libc::MAP_PRIVATE | libc::MAP_ANON;
         let fd = -1;
@@ -57,7 +55,7 @@ impl<'a> SlabPageProvider<'a> for MmapPageProvider {
     /// Uses `munmap` to release the page back to the OS.
     fn release_slabpage(&mut self, p: &'a mut SlabPage<'a>) {
         let addr: *mut libc::c_void = unsafe { transmute(p) };
-        let len: libc::size_t = BASE_PAGE_SIZE;
+        let len: libc::size_t = BASE_PAGE_SIZE as u64;
         let r = unsafe { libc::munmap(addr, len) };
         if r != 0 {
             panic!("munmap failed!");
