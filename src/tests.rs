@@ -166,7 +166,7 @@ macro_rules! test_slab_allocation_panic {
     };
 }
 
-test_slab_allocation!(test_slab_allocation8192_size8_alignment1, 8, 1, 512);
+test_slab_allocation!(test_slab_allocation512_size8_alignment1, 8, 1, 512);
 test_slab_allocation!(test_slab_allocation4096_size8_alignment8, 8, 8, 4096);
 test_slab_allocation!(test_slab_allocation500_size8_alignment64, 8, 64, 500);
 test_slab_allocation!(test_slab_allocation4096_size12_alignment1, 12, 1, 4096);
