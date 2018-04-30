@@ -12,6 +12,9 @@ license = "MIT"
 
 keywords = ["os", "malloc", "slab", "alloc", "memory"]
 
+[dependencies]
+spin = "0.4.8"
+
 [dev-dependencies]
 rand = "0.3"
 libc = "*"
