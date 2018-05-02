@@ -63,10 +63,11 @@ const MAX_SLABS: usize = 10;
 /// A client that wants to use the Zone/Slab allocators
 /// has to provide this interface and stick an implementation of it
 /// into every SlabAllocator.
-pub trait SlabPageProvider<'a> {
+pub trait SlabPageProvider<'a>: Send {
     fn allocate_slabpage(&mut self) -> Option<&'a mut SlabPage<'a>>;
     fn release_slabpage(&mut self, &'a mut SlabPage<'a>);
 }
+
 
 
 /// A zone allocator.
