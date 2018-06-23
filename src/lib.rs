@@ -35,7 +35,7 @@ use core::mem;
 use core::fmt;
 use core::ptr;
 use core::ptr::{NonNull};
-use core::alloc::{GlobalAlloc, Layout, Opaque};
+use core::alloc::{GlobalAlloc, Layout};
 
 use spin::Mutex;
 
@@ -188,7 +188,7 @@ impl<'a> ZoneAllocator<'a>{
     ///  * `old_size` - Size of the block.
     ///  * `align` - Alignment of the block.
     ///
-    pub unsafe fn deallocate<'b>(&'b mut self, opq: NonNull<Opaque>, old_size: usize, align: usize) {
+    pub unsafe fn deallocate<'b>(&'b mut self, opq: NonNull<u8>, old_size: usize, align: usize) {
         let ptr = opq.as_ptr() as *mut u8;
         match self.try_acquire_slab(old_size) {
             Some(idx) => self.slabs[idx].deallocate(ptr),
@@ -219,7 +219,7 @@ impl<'a> ZoneAllocator<'a>{
         // Otherwise allocate, copy, free:
         self.allocate(size, align).map(|new| {
             ZoneAllocator::copy(new, ptr, old_size);
-            self.deallocate(NonNull::new_unchecked(ptr as *mut Opaque), old_size, align);
+            self.deallocate(NonNull::new_unchecked(ptr as *mut u8), old_size, align);
             new
         })
     }*/
@@ -236,17 +236,17 @@ impl SafeZoneAllocator {
 }
 
 unsafe impl GlobalAlloc for SafeZoneAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut Opaque {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         //slog!("size {} align {}", size, align);
         assert!(layout.align().is_power_of_two());
 
         match self.0.lock().allocate(layout.size(), layout.align()) {
-            Some(buf) => buf as *mut Opaque,
-            None => 0 as *mut Opaque,
+            Some(buf) => buf as *mut u8,
+            None => 0 as *mut u8,
         }
     }
 
-    unsafe fn dealloc(&self, ptr: *mut Opaque, layout: Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let ptr = NonNull::new_unchecked(ptr);
         self.0.lock().deallocate(ptr, layout.size(), layout.align());
     }
