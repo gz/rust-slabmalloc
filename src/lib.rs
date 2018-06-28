@@ -430,7 +430,6 @@ impl<'a> SCAllocator<'a> {
 
         let ptr = self.try_allocate_from_pagelist(new_layout);
         if ptr.is_null() {
-            //println!("pagelist is empty!!");
             self.refill_slab(25);
             return self.try_allocate_from_pagelist(layout);
         }
