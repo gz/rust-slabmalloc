@@ -8,31 +8,41 @@ needs to provide is the  necessary mechanism to allocate and free 4KiB frames
 
 ## Usage
 
+* The slabmalloc API is designed to satisfy the rust liballoc low-level memory allocation interface:
+
+```rust
+use slabmalloc::{SafeZoneAllocator};
+#[global_allocator]
+static MEM_PROVIDER: SafeZoneAllocator = SafeZoneAllocator::new(&PAGER);
+```
+
 * Use the ZoneAllocator to allocate arbitrary sized objects:
 ```rust
 let object_size = 12;
 let alignment = 4;
-let mut mmap = MmapPageProvider::new();
-let mut zone = ZoneAllocator::new(Some(&mut mmap));
+let mmap = Mutex::new(MmapPageProvider::new());
+let mut zone = ZoneAllocator::new(&mmap);
 
-
-let allocated = zone.allocate(object_size, alignment);
-allocated.map(|ptr| { zone.deallocate(ptr, object_size, alignment) });
+unsafe {
+  let layout = Layout::from_size_align(object_size, alignment).unwrap();
+  let allocated = zone.allocate(layout);
+  assert!(!allocated.is_null());
+  zone.deallocate(allocated, layout);
+}
 ```
 
-* Use the SlabAllocator to allocate fixed sized objects:
+* Use the SCAllocator to allocate fixed sized objects:
 ```rust
 let object_size = 10;
 let alignment = 8;
-let mut mmap = MmapPageProvider::new();
-let mut sa: SlabAllocator = SlabAllocator::new(object_size, Some(&mut mmap));
-sa.allocate(alignment);
+let layout = Layout::from_size_align(object_size, alignment).unwrap();
+let mut mmap = Mutex::new(MmapPageProvider::new());
+let mut sa: SCAllocator = SCAllocator::new(object_size, &mut mmap);
+sa.allocate(layout);
 ```
-
-The slabmalloc API is designed to satisfy the rust liballoc low-level memory allocation interface.
-
-## TODOs
-  * slabmalloc is not (yet) thread-safe.
 
 ## Documentation
 * [API Documentation](http://gz.github.io/rust-slabmalloc/slabmalloc/)
+
+## TODO
+* No focus on performance yet
