@@ -17,4 +17,4 @@ spin = "0.4.8"
 
 [dev-dependencies]
 rand = "0.3"
-libc = "*"
+libc = "0.2"
