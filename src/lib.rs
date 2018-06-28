@@ -12,10 +12,11 @@
 //!    SCAllocator to allocate ObjectPage.
 //!
 #![allow(unused_features, dead_code, unused_variables)]
-#![feature(const_fn, prelude_import, test, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc)]
+#![feature(
+    const_fn, prelude_import, test, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc
+)]
 #![feature(alloc, allocator_api)]
 #![no_std]
-
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
 
@@ -25,31 +26,30 @@ extern crate spin;
 #[macro_use]
 extern crate std;
 #[cfg(test)]
-extern crate test;
-#[cfg(test)]
 extern crate libc;
 #[cfg(test)]
 extern crate rand;
 #[cfg(test)]
+extern crate test;
+#[cfg(test)]
 mod tests;
 
-use core::mem;
-use core::fmt;
-use core::ptr;
 use core::alloc::{GlobalAlloc, Layout};
+use core::fmt;
+use core::mem;
+use core::ptr;
 use spin::Mutex;
 
-#[cfg(target_arch="x86_64")]
+#[cfg(target_arch = "x86_64")]
 const CACHE_LINE_SIZE: usize = 64;
 
-#[cfg(target_arch="x86_64")]
+#[cfg(target_arch = "x86_64")]
 const BASE_PAGE_SIZE: usize = 4096;
 
-#[cfg(target_arch="x86_64")]
+#[cfg(target_arch = "x86_64")]
 type VAddr = usize;
 
 const MAX_SIZE_CLASSES: usize = 10;
-
 
 pub struct SafeZoneAllocator(Mutex<ZoneAllocator<'static>>);
 
@@ -71,7 +71,6 @@ unsafe impl GlobalAlloc for SafeZoneAllocator {
     }
 }
 
-
 /// The memory backing as used by the SCAllocator.
 ///
 /// A client that wants to use the zone or size class allocators
@@ -92,10 +91,9 @@ pub struct ZoneAllocator<'a> {
     slabs: [SCAllocator<'a>; MAX_SIZE_CLASSES],
 }
 
-impl<'a> ZoneAllocator<'a>{
-
+impl<'a> ZoneAllocator<'a> {
     pub const fn new(pager: &'a Mutex<PageProvider<'a>>) -> ZoneAllocator<'a> {
-        ZoneAllocator{
+        ZoneAllocator {
             pager: pager,
             slabs: [
                 SCAllocator::new(8, pager),
@@ -108,7 +106,7 @@ impl<'a> ZoneAllocator<'a>{
                 SCAllocator::new(1024, pager),
                 SCAllocator::new(2048, pager),
                 SCAllocator::new(4032, pager),
-            ]
+            ],
         }
     }
 
@@ -169,7 +167,7 @@ impl<'a> ZoneAllocator<'a>{
     fn refill_slab_allocator<'b>(&'b mut self, idx: usize) {
         match self.pager.lock().allocate_page() {
             Some(new_head) => self.slabs[idx].insert_slab(new_head),
-            None => panic!("OOM")
+            None => panic!("OOM"),
         };
     }
 
@@ -188,8 +186,8 @@ impl<'a> ZoneAllocator<'a>{
                     p = self.slabs[idx].allocate(layout);
                 }
                 p
-            },
-            None => ptr::null_mut()
+            }
+            None => ptr::null_mut(),
         }
     }
 
@@ -203,7 +201,11 @@ impl<'a> ZoneAllocator<'a>{
     pub unsafe fn deallocate<'b>(&'b mut self, ptr: *mut u8, layout: Layout) {
         match self.try_acquire_slab(layout.size()) {
             Some(idx) => self.slabs[idx].deallocate(ptr, layout),
-            None => panic!("Unable to find slab allocator for size ({}) with ptr {:?}.", layout.size(), ptr)
+            None => panic!(
+                "Unable to find slab allocator for size ({}) with ptr {:?}.",
+                layout.size(),
+                ptr
+            ),
         }
     }
 
@@ -236,25 +238,26 @@ impl<'a> ZoneAllocator<'a>{
     }*/
 }
 
-
 /// A list of ObjectPage.
 struct ObjectPageList<'a> {
     /// Points to the head of the list.
     head: Option<&'a mut ObjectPage<'a>>,
     /// Number of elements in the list.
-    pub elements: usize
+    pub elements: usize,
 }
 
 impl<'a> ObjectPageList<'a> {
-
     const fn new() -> ObjectPageList<'a> {
-        ObjectPageList{ head: None, elements: 0 }
+        ObjectPageList {
+            head: None,
+            elements: 0,
+        }
     }
 
     fn iter_mut<'b>(&'b mut self) -> ObjectPageIterMut<'a> {
         let m = match self.head {
             None => Rawlink::none(),
-            Some(ref mut m) => Rawlink::some(*m)
+            Some(ref mut m) => Rawlink::some(*m),
         };
         ObjectPageIterMut { head: m }
     }
@@ -283,7 +286,7 @@ impl<'a> ObjectPageList<'a> {
             match slab_page.prev.resolve_mut() {
                 None => {
                     self.head = slab_page.next.resolve_mut();
-                },
+                }
                 Some(prev) => {
                     prev.next = match slab_page.next.resolve_mut() {
                         None => Rawlink::none(),
@@ -316,13 +319,11 @@ impl<'a> ObjectPageList<'a> {
 
         false
     }
-
-
 }
 
 /// Iterate over all the pages inside a slab allocator
 struct ObjectPageIterMut<'a> {
-    head: Rawlink<ObjectPage<'a>>
+    head: Rawlink<ObjectPage<'a>>,
 }
 
 impl<'a> Iterator for ObjectPageIterMut<'a> {
@@ -334,14 +335,13 @@ impl<'a> Iterator for ObjectPageIterMut<'a> {
             self.head.resolve_mut().map(|next| {
                 self.head = match next.next.resolve_mut() {
                     None => Rawlink::none(),
-                    Some(ref mut sp) => Rawlink::some(*sp)
+                    Some(ref mut sp) => Rawlink::some(*sp),
                 };
                 next
             })
         }
     }
 }
-
 
 /// A slab allocator allocates elements of a fixed size.
 ///
@@ -356,23 +356,19 @@ pub struct SCAllocator<'a> {
     slabs: ObjectPageList<'a>,
 }
 
-
 #[test]
 pub fn iter_empty_list() {
     let mut new_head1: ObjectPage = Default::default();
     let mut l = ObjectPageList::new();
     l.insert_front(&mut new_head1);
-    for p in l.iter_mut() {
-    }
+    for p in l.iter_mut() {}
 }
 
-
 impl<'a> SCAllocator<'a> {
-
     /// Create a new SCAllocator.
     pub const fn new(size: usize, pager: &'a Mutex<PageProvider<'a>>) -> SCAllocator<'a> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
-        SCAllocator{
+        SCAllocator {
             size: size,
             pager: pager,
             slabs: ObjectPageList::new(),
@@ -395,8 +391,8 @@ impl<'a> SCAllocator<'a> {
             match pager.allocate_page() {
                 Some(new_head) => {
                     self.insert_slab(new_head);
-                },
-                None => panic!("OOM")
+                }
+                None => panic!("OOM"),
             }
         }
     }
@@ -415,8 +411,7 @@ impl<'a> SCAllocator<'a> {
             let ptr = slab_page.allocate(layout);
             if !ptr.is_null() {
                 return ptr;
-            }
-            else {
+            } else {
                 continue;
             }
         }
@@ -432,10 +427,11 @@ impl<'a> SCAllocator<'a> {
         assert!(self.size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
         assert!(new_layout.size() >= layout.size());
-        
+
         let ptr = self.try_allocate_from_pagelist(new_layout);
         if ptr.is_null() {
-            self.refill_slab(1);
+            //println!("pagelist is empty!!");
+            self.refill_slab(25);
             return self.try_allocate_from_pagelist(layout);
         }
         return ptr;
@@ -446,10 +442,8 @@ impl<'a> SCAllocator<'a> {
     /// # Bug
     /// This never releases memory in case the ObjectPage are provided by the zone.
     pub fn deallocate<'b>(&'b mut self, ptr: *mut u8, layout: Layout) {
-        let page = (ptr as usize) & !(BASE_PAGE_SIZE-1) as usize;
-        let slab_page = unsafe {
-            mem::transmute::<VAddr, &'a mut ObjectPage>(page)
-        };
+        let page = (ptr as usize) & !(BASE_PAGE_SIZE - 1) as usize;
+        let slab_page = unsafe { mem::transmute::<VAddr, &'a mut ObjectPage>(page) };
         slab_page.deallocate(ptr, layout);
 
         if slab_page.is_empty() {
@@ -479,7 +473,7 @@ pub struct ObjectPage<'a> {
     /// # Notes
     /// * With only 48 bits we do waste some space at the end of every page for 8 bytes allocations.
     ///   but 12 bytes on-wards is okay.
-    bitfield: [u8; CACHE_LINE_SIZE - 16]
+    bitfield: [u64; 6],
 }
 
 impl<'a> Default for ObjectPage<'a> {
@@ -488,8 +482,8 @@ impl<'a> Default for ObjectPage<'a> {
     }
 }
 
-unsafe impl<'a> Send for ObjectPage<'a> { }
-unsafe impl<'a> Sync for ObjectPage<'a> { }
+unsafe impl<'a> Send for ObjectPage<'a> {}
+unsafe impl<'a> Sync for ObjectPage<'a> {}
 
 impl<'a> fmt::Debug for ObjectPage<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -498,29 +492,33 @@ impl<'a> fmt::Debug for ObjectPage<'a> {
 }
 
 impl<'a> ObjectPage<'a> {
-
     /// Tries to find a free block of memory that satisfies `alignment` requirement.
     ///
     /// # Notes
     /// * We pass size here to be able to calculate the resulting address within `data`.
     fn first_fit(&self, layout: Layout) -> Option<(usize, usize)> {
-        for (base_idx, b) in self.bitfield.iter().enumerate() {
-            for bit_idx in 0..8 {
-                let idx: usize = base_idx * 8 + bit_idx;
-                let offset = idx * layout.size();
+        unsafe {
+            for (base_idx, b) in self.bitfield.iter().enumerate() {
+                if *b == u64::max_value() {
+                    continue;
+                } else {
+                    let negated = !*b;
+                    let first_free = negated.trailing_zeros() as usize;
+                    let idx: usize = base_idx * 64 + first_free;
+                    let offset = idx * layout.size();
 
-                let offset_iniside_data_area = offset <=
-                    (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE as usize - layout.size());
-                if !offset_iniside_data_area {
-                    return None;
-                }
+                    let offset_inside_data_area =
+                        offset <= (BASE_PAGE_SIZE - CACHE_LINE_SIZE - layout.size());
+                    if !offset_inside_data_area {
+                        return None;
+                    }
 
-                let addr: usize = ((self as *const ObjectPage) as usize) + offset;
-                let alignment_ok = addr % layout.align() == 0;
-                let block_is_free = b & (1 << bit_idx) == 0;
-
-                if alignment_ok && block_is_free {
-                    return Some((idx, addr));
+                    let addr: usize = ((self as *const ObjectPage) as usize) + offset;
+                    let alignment_ok = addr % layout.align() == 0;
+                    let block_is_free = b & (1 << first_free) == 0;
+                    if alignment_ok && block_is_free {
+                        return Some((idx, addr));
+                    }
                 }
             }
         }
@@ -533,23 +531,23 @@ impl<'a> ObjectPage<'a> {
     /// In case `idx` is 3 and allocation size of slab is
     /// 8. The corresponding object would start at &data + 3 * 8.
     fn is_allocated(&mut self, idx: usize) -> bool {
-        let base_idx = idx / 8;
-        let bit_idx = idx % 8;
+        let base_idx = idx / 64;
+        let bit_idx = idx % 64;
 
         (self.bitfield[base_idx] & (1 << bit_idx)) > 0
     }
 
     /// Sets the bit number `idx` in the bit-field.
     fn set_bit(&mut self, idx: usize) {
-        let base_idx = idx / 8;
-        let bit_idx = idx % 8;
+        let base_idx = idx / 64;
+        let bit_idx = idx % 64;
         self.bitfield[base_idx] |= 1 << bit_idx;
     }
 
     /// Clears bit number `idx` in the bit-field.
     fn clear_bit(&mut self, idx: usize) {
-        let base_idx = idx / 8;
-        let bit_idx = idx % 8;
+        let base_idx = idx / 64;
+        let bit_idx = idx % 64;
         self.bitfield[base_idx] &= !(1 << bit_idx);
     }
 
@@ -571,20 +569,31 @@ impl<'a> ObjectPage<'a> {
                 self.set_bit(idx);
                 unsafe { mem::transmute::<usize, *mut u8>(addr) }
             }
-            None => ptr::null_mut()
+            None => ptr::null_mut(),
         }
     }
 
     /// Checks if we can still allocate more objects within the page.
     fn is_full(&self) -> bool {
-        self.bitfield.iter().filter(|&x| *x != 0xff).count() == 0
+        unsafe {
+            self.bitfield
+                .iter()
+                .filter(|&x| *x != u64::max_value())
+                .count() == 0
+        }
     }
 
     /// Checks if the page has currently no allocation.
     fn is_empty(&self) -> bool {
-        self.bitfield.iter().filter(|&x| *x > 0x00).count() == 0
+        unsafe { self.bitfield.iter().filter(|&x| *x > 0x0).count() == 0 }
     }
+}
 
+#[test]
+pub fn check_first_fit() {
+    let op: ObjectPage = Default::default();
+    let layout = Layout::from_size_align(8, 8).unwrap();
+    println!("{:?}", op.first_fit(layout));
 }
 
 /// Rawlink is a type like Option<T> but for holding a raw pointer
@@ -599,15 +608,14 @@ impl<T> Default for Rawlink<T> {
 }
 
 impl<T> Rawlink<T> {
-
     /// Like Option::None for Rawlink
     fn none() -> Rawlink<T> {
-        Rawlink{ p: ptr::null_mut() }
+        Rawlink { p: ptr::null_mut() }
     }
 
     /// Like Option::Some for Rawlink
     fn some(n: &mut T) -> Rawlink<T> {
-        Rawlink{p: n}
+        Rawlink { p: n }
     }
 
     /// Convert the `Rawlink` into an Option value
