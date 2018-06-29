@@ -170,8 +170,8 @@ macro_rules! test_sc_allocation {
             // Check that we released everything to our page allocator:
             let pager = mmap.lock();
             assert!(
-                pager.currently_allocated() == 0,
-                "Released all pages to underlying memory manager."
+                pager.currently_allocated() == 1,
+                "Released all but one pages to underlying memory manager."
             );
         }
     };
@@ -229,9 +229,10 @@ fn bench_allocate(b: &mut Bencher) {
     let mut mmap = Mutex::new(MmapPageProvider::new());
     let mut sa: SCAllocator = SCAllocator::new(8, &mut mmap);
     let layout = Layout::from_size_align(8, 1).unwrap();
-    sa.refill_slab(1024);
+    sa.refill_slab(1);
     b.iter(|| {
         let ptr = sa.allocate(layout);
+        assert!(!ptr.is_null());
         sa.deallocate(ptr, layout);
     });
 }
@@ -240,10 +241,11 @@ fn bench_allocate(b: &mut Bencher) {
 fn bench_allocate_big(b: &mut Bencher) {
     let mut mmap = Mutex::new(MmapPageProvider::new());
     let mut sa: SCAllocator = SCAllocator::new(512, &mut mmap);
-    sa.refill_slab(4096);
+    sa.refill_slab(1);
     let layout = Layout::from_size_align(512, 1).unwrap();
     b.iter(|| {
         let ptr = sa.allocate(layout);
+        assert!(!ptr.is_null());
         sa.deallocate(ptr, layout);
     });
 }

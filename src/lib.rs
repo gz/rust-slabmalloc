@@ -445,7 +445,8 @@ impl<'a> SCAllocator<'a> {
         let slab_page = unsafe { mem::transmute::<VAddr, &'a mut ObjectPage>(page) };
         slab_page.deallocate(ptr, layout);
 
-        if slab_page.is_empty() {
+        // Drop page in case it is empty and not the last
+        if slab_page.is_empty() && self.slabs.elements > 1 {
             self.slabs.remove_from_list(slab_page);
             let mut pager = self.pager.lock();
             pager.release_page(slab_page);
@@ -498,10 +499,11 @@ impl<'a> ObjectPage<'a> {
     fn first_fit(&self, layout: Layout) -> Option<(usize, usize)> {
         unsafe {
             for (base_idx, b) in self.bitfield.iter().enumerate() {
-                if *b == u64::max_value() {
+                let bitval = *b;
+                if bitval == u64::max_value() {
                     continue;
                 } else {
-                    let negated = !*b;
+                    let negated = !bitval;
                     let first_free = negated.trailing_zeros() as usize;
                     let idx: usize = base_idx * 64 + first_free;
                     let offset = idx * layout.size();
@@ -514,7 +516,7 @@ impl<'a> ObjectPage<'a> {
 
                     let addr: usize = ((self as *const ObjectPage) as usize) + offset;
                     let alignment_ok = addr % layout.align() == 0;
-                    let block_is_free = b & (1 << first_free) == 0;
+                    let block_is_free = bitval & (1 << first_free) == 0;
                     if alignment_ok && block_is_free {
                         return Some((idx, addr));
                     }
