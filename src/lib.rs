@@ -13,12 +13,21 @@
 //!
 #![allow(unused_features, dead_code, unused_variables)]
 #![feature(
-    const_fn, prelude_import, test, core, raw, ptr_as_ref, core_prelude, core_slice_ext, libc
+    const_fn,
+    prelude_import,
+    test,
+    core,
+    raw,
+    ptr_as_ref,
+    core_prelude,
+    core_slice_ext,
+    libc
 )]
 #![feature(alloc, allocator_api)]
 #![no_std]
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
+#![deny(warnings)]
 
 extern crate spin;
 
