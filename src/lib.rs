@@ -29,6 +29,11 @@
 #![crate_type = "lib"]
 
 extern crate spin;
+#[macro_use]
+extern crate log;
+
+#[cfg(test)]
+extern crate env_logger;
 
 #[cfg(test)]
 #[macro_use]
@@ -432,7 +437,12 @@ impl<'a> SCAllocator<'a> {
     /// In case of failure will try to grow the slab allocator by requesting
     /// additional pages and re-try the allocation once more before we give up.
     pub fn allocate<'b>(&'b mut self, layout: Layout) -> *mut u8 {
-        assert!(self.size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
+        debug!(
+            "SCAllocator({}) is trying to allocate {:?}",
+            self.size, layout
+        );
+        assert!(layout.size() <= self.size);
+        assert!(self.size <= (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
         assert!(new_layout.size() >= layout.size());
 
@@ -441,6 +451,11 @@ impl<'a> SCAllocator<'a> {
             self.refill_slab(1);
             return self.try_allocate_from_pagelist(layout);
         }
+
+        debug!(
+            "SCAllocator({}) allocated ptr=0x{:x}",
+            self.size, ptr as usize
+        );
         return ptr;
     }
 
@@ -449,9 +464,19 @@ impl<'a> SCAllocator<'a> {
     /// # Bug
     /// This never releases memory in case the ObjectPage are provided by the zone.
     pub fn deallocate<'b>(&'b mut self, ptr: *mut u8, layout: Layout) {
+        debug!(
+            "SCAllocator({}) is trying to deallocate ptr = 0x{:x} layout={:?}",
+            self.size, ptr as usize, layout
+        );
+        assert!(layout.size() <= self.size);
+
         let page = (ptr as usize) & !(BASE_PAGE_SIZE - 1) as usize;
         let slab_page = unsafe { mem::transmute::<VAddr, &'a mut ObjectPage>(page) };
-        slab_page.deallocate(ptr, layout);
+
+        assert!(self.size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
+        let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
+
+        slab_page.deallocate(ptr, new_layout);
 
         // Drop page in case it is empty and not the last
         if slab_page.is_empty() && self.slabs.elements > 1 {
@@ -562,10 +587,18 @@ impl<'a> ObjectPage<'a> {
 
     /// Deallocates a memory object within this page.
     fn deallocate(&mut self, ptr: *mut u8, layout: Layout) {
+        debug!(
+            "ObjectPage deallocating ptr = 0x{:x} with {:?}",
+            ptr as usize, layout
+        );
         let page_offset = (ptr as usize) & 0xfff;
         assert!(page_offset % layout.size() == 0);
         let idx = page_offset / layout.size();
-        assert!(self.is_allocated(idx));
+        assert!(
+            self.is_allocated(idx),
+            "ptr = 0x{:x} was not allocated",
+            ptr as usize
+        );
         self.clear_bit(idx);
     }
 

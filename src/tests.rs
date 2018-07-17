@@ -1,3 +1,4 @@
+use env_logger;
 use libc;
 use rand;
 use spin::Mutex;
@@ -212,6 +213,21 @@ fn test_readme() {
         assert!(!allocated.is_null());
         zone.deallocate(allocated, layout);
     }
+}
+
+#[test]
+fn test_bug1() {
+    let _ = env_logger::init();
+
+    let mut mmap = Mutex::new(MmapPageProvider::new());
+    let mut sa: SCAllocator = SCAllocator::new(8, &mut mmap);
+    sa.refill_slab(1);
+
+    let ptr1 = sa.allocate(Layout::from_size_align(1, 1).unwrap());
+    let ptr2 = sa.allocate(Layout::from_size_align(2, 1).unwrap());
+    sa.deallocate(ptr1, Layout::from_size_align(1, 1).unwrap());
+    let ptr3 = sa.allocate(Layout::from_size_align(4, 1).unwrap());
+    sa.deallocate(ptr2, Layout::from_size_align(2, 1).unwrap());
 }
 
 #[test]
