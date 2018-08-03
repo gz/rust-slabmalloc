@@ -105,6 +105,8 @@ pub struct ZoneAllocator<'a> {
 }
 
 impl<'a> ZoneAllocator<'a> {
+    pub const MAX_ALLOC_SIZE: usize = 4032;
+
     pub const fn new(pager: &'a Mutex<PageProvider<'a>>) -> ZoneAllocator<'a> {
         ZoneAllocator {
             pager: pager,
