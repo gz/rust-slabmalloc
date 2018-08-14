@@ -13,7 +13,6 @@
 //!
 #![allow(unused_features, dead_code, unused_variables)]
 #![feature(const_fn, prelude_import, test, raw, libc)]
-#![feature(alloc, allocator_api)]
 #![no_std]
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
