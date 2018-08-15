@@ -612,7 +612,8 @@ impl<'a> ObjectPage<'a> {
             self.bitfield
                 .iter()
                 .filter(|&x| *x != u64::max_value())
-                .count() == 0
+                .count()
+                == 0
         }
     }
 
