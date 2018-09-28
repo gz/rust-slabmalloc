@@ -12,7 +12,8 @@
 //!    SCAllocator to allocate ObjectPage.
 //!
 #![allow(unused_features, dead_code, unused_variables)]
-#![feature(const_fn, prelude_import, test, raw, libc)]
+#![cfg_attr(feature = "unstable", feature(const_fn))]
+#![cfg_attr(test, feature(prelude_import, test, raw, libc))]
 #![no_std]
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
@@ -56,7 +57,12 @@ const MAX_SIZE_CLASSES: usize = 10;
 pub struct SafeZoneAllocator(Mutex<ZoneAllocator<'static>>);
 
 impl SafeZoneAllocator {
+    #[cfg(feature = "unstable")]
     pub const fn new(provider: &'static Mutex<PageProvider>) -> SafeZoneAllocator {
+        SafeZoneAllocator(Mutex::new(ZoneAllocator::new(provider)))
+    }
+    #[cfg(not(feature = "unstable"))]
+    pub fn new(provider: &'static Mutex<PageProvider>) -> SafeZoneAllocator {
         SafeZoneAllocator(Mutex::new(ZoneAllocator::new(provider)))
     }
 }
@@ -96,7 +102,26 @@ pub struct ZoneAllocator<'a> {
 impl<'a> ZoneAllocator<'a> {
     pub const MAX_ALLOC_SIZE: usize = 4032;
 
+    #[cfg(feature = "unstable")]
     pub const fn new(pager: &'a Mutex<PageProvider<'a>>) -> ZoneAllocator<'a> {
+        ZoneAllocator {
+            pager: pager,
+            slabs: [
+                SCAllocator::new(8, pager),
+                SCAllocator::new(16, pager),
+                SCAllocator::new(32, pager),
+                SCAllocator::new(64, pager),
+                SCAllocator::new(128, pager),
+                SCAllocator::new(256, pager),
+                SCAllocator::new(512, pager),
+                SCAllocator::new(1024, pager),
+                SCAllocator::new(2048, pager),
+                SCAllocator::new(4032, pager),
+            ],
+        }
+    }
+    #[cfg(not(feature = "unstable"))]
+    pub fn new(pager: &'a Mutex<PageProvider<'a>>) -> ZoneAllocator<'a> {
         ZoneAllocator {
             pager: pager,
             slabs: [
@@ -251,7 +276,15 @@ struct ObjectPageList<'a> {
 }
 
 impl<'a> ObjectPageList<'a> {
+    #[cfg(feature = "unstable")]
     const fn new() -> ObjectPageList<'a> {
+        ObjectPageList {
+            head: None,
+            elements: 0,
+        }
+    }
+    #[cfg(not(feature = "unstable"))]
+    fn new() -> ObjectPageList<'a> {
         ObjectPageList {
             head: None,
             elements: 0,
@@ -370,7 +403,18 @@ pub fn iter_empty_list() {
 
 impl<'a> SCAllocator<'a> {
     /// Create a new SCAllocator.
+    #[cfg(feature = "unstable")]
     pub const fn new(size: usize, pager: &'a Mutex<PageProvider<'a>>) -> SCAllocator<'a> {
+        // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
+        SCAllocator {
+            size: size,
+            pager: pager,
+            slabs: ObjectPageList::new(),
+        }
+    }
+    /// Create a new SCAllocator.
+    #[cfg(not(feature = "unstable"))]
+    pub fn new(size: usize, pager: &'a Mutex<PageProvider<'a>>) -> SCAllocator<'a> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
         SCAllocator {
             size: size,
