@@ -232,7 +232,7 @@ impl<'a> ZoneAllocator<'a> {
             },
             None => ()
         };
-
+    
         // Otherwise allocate, copy, free:
         self.allocate(size, align).map(|new| {
             ZoneAllocator::copy(new, ptr, old_size);
