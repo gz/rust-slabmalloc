@@ -41,6 +41,14 @@ let mut sa: SCAllocator = SCAllocator::new(object_size, &mut mmap);
 sa.allocate(layout);
 ```
 
+## Using on stable
+By default this packages requires a nightly version of the Rust
+compiler. To be able to use this package with a stable version of the
+Rust compiler, default features have to be disabled, e.g. with
+```
+slabmalloc = { version = ..., default_features = false }
+```
+
 ## Documentation
 * [API Documentation](http://gz.github.io/rust-slabmalloc/slabmalloc/)
 
