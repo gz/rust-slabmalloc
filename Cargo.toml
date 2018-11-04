@@ -20,7 +20,7 @@ default = [ "unstable" ]
 spin = { version = "0.4.8", default_features = false }
 log = "0.4"
 
-[dev-dependencies]
+[target.'cfg(unix)'.dev-dependencies]
 rand = "0.3"
 libc = "0.2"
 env_logger = "0.5.10"
