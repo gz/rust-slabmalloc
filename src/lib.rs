@@ -13,7 +13,7 @@
 //!
 #![allow(unused_features, dead_code, unused_variables)]
 #![cfg_attr(feature = "unstable", feature(const_fn))]
-#![cfg_attr(test, feature(prelude_import, test, raw, libc))]
+#![cfg_attr(test, feature(prelude_import, test, raw, libc, c_void_variant))]
 #![no_std]
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
