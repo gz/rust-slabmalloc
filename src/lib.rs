@@ -257,7 +257,7 @@ impl<'a> ZoneAllocator<'a> {
             },
             None => ()
         };
-    
+
         // Otherwise allocate, copy, free:
         self.allocate(size, align).map(|new| {
             ZoneAllocator::copy(new, ptr, old_size);
@@ -508,7 +508,7 @@ impl<'a> SCAllocator<'a> {
         let page = (ptr as usize) & !(BASE_PAGE_SIZE - 1) as usize;
         let slab_page = unsafe { mem::transmute::<VAddr, &'a mut ObjectPage>(page) };
 
-        assert!(self.size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
+        assert!(self.size <= (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
 
         slab_page.deallocate(ptr, new_layout);
