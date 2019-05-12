@@ -472,9 +472,10 @@ impl<'a> SCAllocator<'a> {
     /// In case of failure will try to grow the slab allocator by requesting
     /// additional pages and re-try the allocation once more before we give up.
     pub fn allocate<'b>(&'b mut self, layout: Layout) -> *mut u8 {
-        debug!(
+        trace!(
             "SCAllocator({}) is trying to allocate {:?}",
-            self.size, layout
+            self.size,
+            layout
         );
         assert!(layout.size() <= self.size);
         assert!(self.size <= (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
@@ -487,9 +488,10 @@ impl<'a> SCAllocator<'a> {
             return self.try_allocate_from_pagelist(layout);
         }
 
-        debug!(
+        trace!(
             "SCAllocator({}) allocated ptr=0x{:x}",
-            self.size, ptr as usize
+            self.size,
+            ptr as usize
         );
         return ptr;
     }
@@ -499,9 +501,11 @@ impl<'a> SCAllocator<'a> {
     /// # Bug
     /// This never releases memory in case the ObjectPage are provided by the zone.
     pub fn deallocate<'b>(&'b mut self, ptr: *mut u8, layout: Layout) {
-        debug!(
+        trace!(
             "SCAllocator({}) is trying to deallocate ptr = 0x{:x} layout={:?}",
-            self.size, ptr as usize, layout
+            self.size,
+            ptr as usize,
+            layout
         );
         assert!(layout.size() <= self.size);
 
@@ -622,9 +626,10 @@ impl<'a> ObjectPage<'a> {
 
     /// Deallocates a memory object within this page.
     fn deallocate(&mut self, ptr: *mut u8, layout: Layout) {
-        debug!(
+        trace!(
             "ObjectPage deallocating ptr = 0x{:x} with {:?}",
-            ptr as usize, layout
+            ptr as usize,
+            layout
         );
         let page_offset = (ptr as usize) & 0xfff;
         assert!(page_offset % layout.size() == 0);
