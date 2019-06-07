@@ -58,11 +58,11 @@ pub struct SafeZoneAllocator(Mutex<ZoneAllocator<'static>>);
 
 impl SafeZoneAllocator {
     #[cfg(feature = "unstable")]
-    pub const fn new(provider: &'static Mutex<PageProvider>) -> SafeZoneAllocator {
+    pub const fn new(provider: &'static Mutex<dyn PageProvider>) -> SafeZoneAllocator {
         SafeZoneAllocator(Mutex::new(ZoneAllocator::new(provider)))
     }
     #[cfg(not(feature = "unstable"))]
-    pub fn new(provider: &'static Mutex<PageProvider>) -> SafeZoneAllocator {
+    pub fn new(provider: &'static Mutex<dyn PageProvider>) -> SafeZoneAllocator {
         SafeZoneAllocator(Mutex::new(ZoneAllocator::new(provider)))
     }
 }
@@ -95,7 +95,7 @@ pub trait PageProvider<'a>: Send {
 /// allocation requests for many different (MAX_SIZE_CLASSES) object sizes
 /// (by selecting the right slab allocator).
 pub struct ZoneAllocator<'a> {
-    pager: &'a Mutex<PageProvider<'a>>,
+    pager: &'a Mutex<dyn PageProvider<'a>>,
     slabs: [SCAllocator<'a>; MAX_SIZE_CLASSES],
 }
 
@@ -103,7 +103,7 @@ impl<'a> ZoneAllocator<'a> {
     pub const MAX_ALLOC_SIZE: usize = 4032;
 
     #[cfg(feature = "unstable")]
-    pub const fn new(pager: &'a Mutex<PageProvider<'a>>) -> ZoneAllocator<'a> {
+    pub const fn new(pager: &'a Mutex<dyn PageProvider<'a>>) -> ZoneAllocator<'a> {
         ZoneAllocator {
             pager: pager,
             slabs: [
@@ -121,7 +121,7 @@ impl<'a> ZoneAllocator<'a> {
         }
     }
     #[cfg(not(feature = "unstable"))]
-    pub fn new(pager: &'a Mutex<PageProvider<'a>>) -> ZoneAllocator<'a> {
+    pub fn new(pager: &'a Mutex<dyn PageProvider<'a>>) -> ZoneAllocator<'a> {
         ZoneAllocator {
             pager: pager,
             slabs: [
@@ -144,16 +144,16 @@ impl<'a> ZoneAllocator<'a> {
     /// Used to optimize `realloc`.
     fn get_max_size(current_size: usize) -> Option<usize> {
         match current_size {
-            0...8 => Some(8),
-            9...16 => Some(16),
-            17...32 => Some(32),
-            33...64 => Some(64),
-            65...128 => Some(128),
-            129...256 => Some(256),
-            257...512 => Some(512),
-            513...1024 => Some(1024),
-            1025...2048 => Some(2048),
-            2049...4032 => Some(4032),
+            0..=8 => Some(8),
+            9..=16 => Some(16),
+            17..=32 => Some(32),
+            33..=64 => Some(64),
+            65..=128 => Some(128),
+            129..=256 => Some(256),
+            257..=512 => Some(512),
+            513..=1024 => Some(1024),
+            1025..=2048 => Some(2048),
+            2049..=4032 => Some(4032),
             _ => None,
         }
     }
@@ -161,16 +161,16 @@ impl<'a> ZoneAllocator<'a> {
     /// Figure out index into zone array to get the correct slab allocator for that size.
     fn get_slab_idx(requested_size: usize) -> Option<usize> {
         match requested_size {
-            0...8 => Some(0),
-            9...16 => Some(1),
-            17...32 => Some(2),
-            33...64 => Some(3),
-            65...128 => Some(4),
-            129...256 => Some(5),
-            257...512 => Some(6),
-            513...1024 => Some(7),
-            1025...2048 => Some(8),
-            2049...4032 => Some(9),
+            0..=8 => Some(0),
+            9..=16 => Some(1),
+            17..=32 => Some(2),
+            33..=64 => Some(3),
+            65..=128 => Some(4),
+            129..=256 => Some(5),
+            257..=512 => Some(6),
+            513..=1024 => Some(7),
+            1025..=2048 => Some(8),
+            2049..=4032 => Some(9),
             _ => None,
         }
     }
@@ -388,7 +388,7 @@ pub struct SCAllocator<'a> {
     /// Allocation size.
     size: usize,
     /// Memory backing store, to request new ObjectPage.
-    pager: &'a Mutex<PageProvider<'a>>,
+    pager: &'a Mutex<dyn PageProvider<'a>>,
     /// List of ObjectPage.
     slabs: ObjectPageList<'a>,
 }
@@ -404,7 +404,7 @@ pub fn iter_empty_list() {
 impl<'a> SCAllocator<'a> {
     /// Create a new SCAllocator.
     #[cfg(feature = "unstable")]
-    pub const fn new(size: usize, pager: &'a Mutex<PageProvider<'a>>) -> SCAllocator<'a> {
+    pub const fn new(size: usize, pager: &'a Mutex<dyn PageProvider<'a>>) -> SCAllocator<'a> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
         SCAllocator {
             size: size,
