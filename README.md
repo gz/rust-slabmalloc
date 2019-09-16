@@ -50,7 +50,7 @@ slabmalloc = { version = ..., default_features = false }
 ```
 
 ## Documentation
-* [API Documentation](http://gz.github.io/rust-slabmalloc/slabmalloc/)
+* [API Documentation](https://docs.rs/slabmalloc)
 
 ## TODO
 * No focus on performance yet
