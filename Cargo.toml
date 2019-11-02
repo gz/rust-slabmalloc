@@ -21,6 +21,6 @@ spin = "0.5.2"
 log = "0.4"
 
 [target.'cfg(unix)'.dev-dependencies]
-rand = "0.3"
+rand = "0.7"
 libc = "0.2"
-env_logger = "0.5.10"
+env_logger = "0.7"
