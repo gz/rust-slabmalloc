@@ -1,14 +1,14 @@
 [package]
 name = "slabmalloc"
-version = "0.3.4"
+version = "0.4.0"
 authors = ["Gerd Zellweger <mail@gerdzellweger.com>"]
 description = "Simple slab based malloc implementation in rust. Can be used stand-alone or in order to provide the necessary interface to rusts liballoc library. slabmalloc only relies on libcore."
 homepage = "https://github.com/gz/rust-slabmalloc"
 repository = "https://github.com/gz/rust-slabmalloc"
 documentation = "http://gz.github.io/rust-slabmalloc/slabmalloc/"
-
 readme = "README.md"
 license = "MIT"
+edition = "2018"
 
 keywords = ["os", "malloc", "slab", "alloc", "memory"]
 

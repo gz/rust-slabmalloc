@@ -7,9 +7,7 @@ use std::alloc::Layout;
 use std::mem::{size_of, transmute};
 use std::prelude::v1::*;
 
-// The types we want to test:
-use super::{ObjectPage, PageProvider, SCAllocator, ZoneAllocator, BASE_PAGE_SIZE};
-
+use super::*;
 use test::Bencher;
 
 /// Page allocator based on mmap/munmap system calls for backing slab memory.
@@ -29,6 +27,11 @@ impl MmapPageProvider {
     pub fn currently_allocated(&self) -> usize {
         self.currently_allocated
     }
+}
+
+trait PageProvider<'a>: Send {
+    fn allocate_page(&mut self) -> Option<&'a mut ObjectPage<'a>>;
+    fn release_page(&mut self, page: &'a mut ObjectPage<'a>);
 }
 
 impl<'a> PageProvider<'a> for MmapPageProvider {
@@ -95,23 +98,34 @@ macro_rules! test_sc_allocation {
     ($test:ident, $size:expr, $alignment:expr, $allocations:expr) => {
         #[test]
         fn $test() {
-            let mut mmap = Mutex::new(MmapPageProvider::new());
-
+            let mut mmap = MmapPageProvider::new();
             {
-                let mut sa: SCAllocator = SCAllocator::new($size, &mut mmap);
+                let mut sa: SCAllocator = SCAllocator::new($size);
                 let alignment = $alignment;
 
-                let mut objects: Vec<*mut u8> = Vec::new();
+                let mut objects: Vec<NonNull<u8>> = Vec::new();
                 let mut vec: Vec<(usize, &mut [usize; $size / 8])> = Vec::new();
                 let layout = Layout::from_size_align($size, alignment).unwrap();
 
                 for _ in 0..$allocations {
-                    let ptr = sa.allocate(layout);
-                    if ptr.is_null() {
-                        panic!("OOM is unlikely.");
-                    } else {
-                        unsafe { vec.push((rand::random::<usize>(), transmute(ptr))) };
-                        objects.push(ptr)
+                    loop {
+                        match sa.allocate(layout) {
+                            // Allocation was successful
+                            Ok(nptr) => {
+                                unsafe {
+                                    vec.push((rand::random::<usize>(), transmute(nptr.as_ptr())))
+                                };
+                                objects.push(nptr);
+                                break;
+                            }
+                            // Couldn't allocate need to refill first
+                            Err(AllocationError::OutOfMemory(_)) => {
+                                let page = mmap.allocate_page().unwrap();
+                                sa.insert_slab(page);
+                            }
+                            // Unexpected errors
+                            Err(AllocationError::InvalidLayout) => unreachable!("Unexpected error"),
+                        }
                     }
                 }
 
@@ -127,8 +141,8 @@ macro_rules! test_sc_allocation {
                 for item in vec.iter() {
                     let (pattern, ref obj) = *item;
                     for i in 0..obj.len() {
-                        assert!(
-                            (obj[i]) == pattern,
+                        assert_eq!(
+                            obj[i], pattern,
                             "No two allocations point to the same memory."
                         );
                     }
@@ -145,20 +159,32 @@ macro_rules! test_sc_allocation {
                 objects.clear();
 
                 // then allocate everything again,
-                for idx in 0..$allocations {
-                    let ptr = sa.allocate(layout);
-                    if ptr.is_null() {
-                        panic!("OOM is unlikely.");
-                    } else {
-                        unsafe { vec.push((rand::random::<usize>(), transmute(ptr))) };
-                        objects.push(ptr)
+                for _ in 0..$allocations {
+                    loop {
+                        match sa.allocate(layout) {
+                            // Allocation was successful
+                            Ok(nptr) => {
+                                unsafe {
+                                    vec.push((rand::random::<usize>(), transmute(nptr.as_ptr())))
+                                };
+                                objects.push(nptr);
+                                break;
+                            }
+                            // Couldn't allocate need to refill first
+                            Err(AllocationError::OutOfMemory(_)) => {
+                                let page = mmap.allocate_page().unwrap();
+                                sa.insert_slab(page);
+                            }
+                            // Unexpected errors
+                            Err(AllocationError::InvalidLayout) => unreachable!("Unexpected error"),
+                        }
                     }
                 }
 
                 // and make sure we do not request more pages than what we had previously
                 // println!("{} {}", pages_allocated, sa.slabs.elements);
-                assert!(
-                    pages_allocated == sa.slabs.elements,
+                assert_eq!(
+                    pages_allocated, sa.slabs.elements,
                     "Did not use more memory for 2nd allocation run."
                 );
 
@@ -169,10 +195,10 @@ macro_rules! test_sc_allocation {
             }
 
             // Check that we released everything to our page allocator:
-            let pager = mmap.lock();
-            assert!(
-                pager.currently_allocated() == 1,
-                "Released all but one pages to underlying memory manager."
+            assert_eq!(
+                mmap.currently_allocated(),
+                1,
+                "Released all but one page to underlying memory manager."
             );
         }
     };
@@ -201,67 +227,89 @@ fn invalid_alignment() {
 }
 
 #[test]
-fn test_readme() {
+fn test_readme() -> Result<(), AllocationError> {
     let object_size = 12;
     let alignment = 4;
-    let mmap = Mutex::new(MmapPageProvider::new());
-    let mut zone = ZoneAllocator::new(&mmap);
+
+    let mut mmap = MmapPageProvider::new();
+    let page = mmap.allocate_page();
+
+    let mut zone = ZoneAllocator::new();
+    let layout = Layout::from_size_align(object_size, alignment).unwrap();
+    zone.refill(layout, page.unwrap());
 
     unsafe {
-        let layout = Layout::from_size_align(object_size, alignment).unwrap();
-        let allocated = zone.allocate(layout);
-        assert!(!allocated.is_null());
-        zone.deallocate(allocated, layout);
+        let allocated = zone.allocate(layout)?;
+        zone.deallocate(allocated, layout)?;
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_bug1() {
-    let _ = env_logger::init();
+fn test_bug1() -> Result<(), AllocationError> {
+    let _ = env_logger::try_init();
 
-    let mut mmap = Mutex::new(MmapPageProvider::new());
-    let mut sa: SCAllocator = SCAllocator::new(8, &mut mmap);
-    sa.refill_slab(1);
+    let mut mmap = MmapPageProvider::new();
+    let page = mmap.allocate_page();
 
-    let ptr1 = sa.allocate(Layout::from_size_align(1, 1).unwrap());
-    let ptr2 = sa.allocate(Layout::from_size_align(2, 1).unwrap());
-    sa.deallocate(ptr1, Layout::from_size_align(1, 1).unwrap());
-    let ptr3 = sa.allocate(Layout::from_size_align(4, 1).unwrap());
-    sa.deallocate(ptr2, Layout::from_size_align(2, 1).unwrap());
+    let mut sa: SCAllocator = SCAllocator::new(8);
+    sa.insert_slab(page.unwrap());
+
+    let ptr1 = sa.allocate(Layout::from_size_align(1, 1).unwrap())?;
+    let ptr2 = sa.allocate(Layout::from_size_align(2, 1).unwrap())?;
+    sa.deallocate(ptr1, Layout::from_size_align(1, 1).unwrap())?;
+    let ptr3 = sa.allocate(Layout::from_size_align(4, 1).unwrap())?;
+    sa.deallocate(ptr2, Layout::from_size_align(2, 1).unwrap())
 }
 
 #[test]
-fn test_readme2() {
+fn test_readme2() -> Result<(), AllocationError> {
+    let _ = env_logger::try_init();
+
     let object_size = 10;
     let alignment = 8;
     let layout = Layout::from_size_align(object_size, alignment).unwrap();
-    let mut mmap = Mutex::new(MmapPageProvider::new());
-    let mut sa: SCAllocator = SCAllocator::new(object_size, &mut mmap);
-    sa.allocate(layout);
+    let mut mmap = MmapPageProvider::new();
+    let page = mmap.allocate_page();
+
+    let mut sa: SCAllocator = SCAllocator::new(object_size);
+    sa.insert_slab(page.unwrap());
+
+    sa.allocate(layout)?;
+    Ok(())
 }
 
 #[bench]
 fn bench_allocate(b: &mut Bencher) {
-    let mut mmap = Mutex::new(MmapPageProvider::new());
-    let mut sa: SCAllocator = SCAllocator::new(8, &mut mmap);
+    let _ = env_logger::try_init();
+
+    let mut mmap = MmapPageProvider::new();
+    let mut sa: SCAllocator = SCAllocator::new(8);
     let layout = Layout::from_size_align(8, 1).unwrap();
-    sa.refill_slab(1);
+
+    let page = mmap.allocate_page();
+    sa.insert_slab(page.unwrap());
+
     b.iter(|| {
-        let ptr = sa.allocate(layout);
-        assert!(!ptr.is_null());
+        let ptr = sa.allocate(layout).expect("Can't allocate");
         sa.deallocate(ptr, layout);
     });
 }
 
 #[bench]
 fn bench_allocate_big(b: &mut Bencher) {
-    let mut mmap = Mutex::new(MmapPageProvider::new());
-    let mut sa: SCAllocator = SCAllocator::new(512, &mut mmap);
-    sa.refill_slab(1);
+    let _ = env_logger::try_init();
+
+    let mut mmap = MmapPageProvider::new();
+    let mut sa: SCAllocator = SCAllocator::new(512);
+
+    let page = mmap.allocate_page();
+    sa.insert_slab(page.unwrap());
+
     let layout = Layout::from_size_align(512, 1).unwrap();
     b.iter(|| {
-        let ptr = sa.allocate(layout);
-        assert!(!ptr.is_null());
+        let ptr = sa.allocate(layout).expect("Can't allocate");
         sa.deallocate(ptr, layout);
     });
 }
@@ -273,4 +321,11 @@ fn compare_vs_alloc(b: &mut Bencher) {
         let ptr = alloc::alloc(layout);
         alloc::dealloc(ptr, layout);
     });
+}
+
+#[test]
+pub fn check_first_fit() {
+    let op: ObjectPage = Default::default();
+    let layout = Layout::from_size_align(8, 8).unwrap();
+    println!("{:?}", op.first_fit(layout));
 }

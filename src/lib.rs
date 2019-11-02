@@ -8,8 +8,6 @@
 //!  * A `SCAllocator` allocates objects of exactly one size.
 //!    It holds its data in a ObjectPageList.
 //!  * A `ObjectPage` contains allocated objects and associated meta-data.
-//!  * A `PageProvider` is provided by the client and used by the
-//!    SCAllocator to allocate ObjectPage.
 //!
 #![allow(unused_features, dead_code, unused_variables)]
 #![cfg_attr(feature = "unstable", feature(const_fn))]
@@ -40,7 +38,7 @@ mod tests;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt;
 use core::mem;
-use core::ptr;
+use core::ptr::{self, NonNull};
 use spin::Mutex;
 
 #[cfg(target_arch = "x86_64")]
@@ -54,39 +52,47 @@ type VAddr = usize;
 
 const MAX_SIZE_CLASSES: usize = 10;
 
+#[derive(Debug)]
+pub enum AllocationError {
+    /// Can't satisfy the request for Layout
+    OutOfMemory(Layout),
+    /// Allocator can't deal with the provided Layout
+    InvalidLayout,
+}
+
 pub struct SafeZoneAllocator(Mutex<ZoneAllocator<'static>>);
 
 impl SafeZoneAllocator {
     #[cfg(feature = "unstable")]
-    pub const fn new(provider: &'static Mutex<dyn PageProvider>) -> SafeZoneAllocator {
-        SafeZoneAllocator(Mutex::new(ZoneAllocator::new(provider)))
+    pub const fn new() -> SafeZoneAllocator {
+        SafeZoneAllocator(Mutex::new(ZoneAllocator::new()))
     }
     #[cfg(not(feature = "unstable"))]
-    pub fn new(provider: &'static Mutex<dyn PageProvider>) -> SafeZoneAllocator {
-        SafeZoneAllocator(Mutex::new(ZoneAllocator::new(provider)))
+    pub fn new() -> SafeZoneAllocator {
+        SafeZoneAllocator(Mutex::new(ZoneAllocator::new()))
     }
 }
 
 unsafe impl GlobalAlloc for SafeZoneAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         assert!(layout.align().is_power_of_two());
-        self.0.lock().allocate(layout)
+        match self.0.lock().allocate(layout) {
+            Ok(nptr) => nptr.as_ptr(),
+            Err(AllocationError::OutOfMemory(l)) => panic!("No memory in slabs, needs refilling"),
+            Err(AllocationError::InvalidLayout) => panic!("Can't allocate this size"),
+        }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        //let ptr = NonNull::new_unchecked(ptr);
-        self.0.lock().deallocate(ptr, layout);
+        if let Some(nptr) = NonNull::new(ptr) {
+            self.0
+                .lock()
+                .deallocate(nptr, layout)
+                .expect("Couldn't deallocate");
+        } else {
+            // Nothing to do (don't dealloc null pointers).
+        }
     }
-}
-
-/// The memory backing as used by the SCAllocator.
-///
-/// A client that wants to use the zone or size class allocators
-/// has to provide this interface and stick an implementation of it
-/// into every SCAllocator.
-pub trait PageProvider<'a>: Send {
-    fn allocate_page(&mut self) -> Option<&'a mut ObjectPage<'a>>;
-    fn release_page(&mut self, &'a mut ObjectPage<'a>);
 }
 
 /// A zone allocator.
@@ -95,7 +101,6 @@ pub trait PageProvider<'a>: Send {
 /// allocation requests for many different (MAX_SIZE_CLASSES) object sizes
 /// (by selecting the right slab allocator).
 pub struct ZoneAllocator<'a> {
-    pager: &'a Mutex<dyn PageProvider<'a>>,
     slabs: [SCAllocator<'a>; MAX_SIZE_CLASSES],
 }
 
@@ -103,38 +108,36 @@ impl<'a> ZoneAllocator<'a> {
     pub const MAX_ALLOC_SIZE: usize = 4032;
 
     #[cfg(feature = "unstable")]
-    pub const fn new(pager: &'a Mutex<dyn PageProvider<'a>>) -> ZoneAllocator<'a> {
+    pub const fn new() -> ZoneAllocator<'a> {
         ZoneAllocator {
-            pager: pager,
             slabs: [
-                SCAllocator::new(8, pager),
-                SCAllocator::new(16, pager),
-                SCAllocator::new(32, pager),
-                SCAllocator::new(64, pager),
-                SCAllocator::new(128, pager),
-                SCAllocator::new(256, pager),
-                SCAllocator::new(512, pager),
-                SCAllocator::new(1024, pager),
-                SCAllocator::new(2048, pager),
-                SCAllocator::new(4032, pager),
+                SCAllocator::new(8),
+                SCAllocator::new(16),
+                SCAllocator::new(32),
+                SCAllocator::new(64),
+                SCAllocator::new(128),
+                SCAllocator::new(256),
+                SCAllocator::new(512),
+                SCAllocator::new(1024),
+                SCAllocator::new(2048),
+                SCAllocator::new(4032),
             ],
         }
     }
     #[cfg(not(feature = "unstable"))]
-    pub fn new(pager: &'a Mutex<dyn PageProvider<'a>>) -> ZoneAllocator<'a> {
+    pub fn new() -> ZoneAllocator<'a> {
         ZoneAllocator {
-            pager: pager,
             slabs: [
-                SCAllocator::new(8, pager),
-                SCAllocator::new(16, pager),
-                SCAllocator::new(32, pager),
-                SCAllocator::new(64, pager),
-                SCAllocator::new(128, pager),
-                SCAllocator::new(256, pager),
-                SCAllocator::new(512, pager),
-                SCAllocator::new(1024, pager),
-                SCAllocator::new(2048, pager),
-                SCAllocator::new(4032, pager),
+                SCAllocator::new(8),
+                SCAllocator::new(16),
+                SCAllocator::new(32),
+                SCAllocator::new(64),
+                SCAllocator::new(128),
+                SCAllocator::new(256),
+                SCAllocator::new(512),
+                SCAllocator::new(1024),
+                SCAllocator::new(2048),
+                SCAllocator::new(4032),
             ],
         }
     }
@@ -189,15 +192,19 @@ impl<'a> ZoneAllocator<'a> {
         })
     }
 
-    /// Refills the SCAllocator in slabs at `idx` with a ObjectPage.
-    ///
-    /// # TODO
-    ///  * Panics in case we're OOM (should probably return error).
-    fn refill_slab_allocator<'b>(&'b mut self, idx: usize) {
-        match self.pager.lock().allocate_page() {
-            Some(new_head) => self.slabs[idx].insert_slab(new_head),
-            None => panic!("OOM"),
-        };
+    /// Refills the SCAllocator for a given Layouyt with an ObjectPage.
+    pub fn refill(
+        &mut self,
+        layout: Layout,
+        new_page: &'a mut ObjectPage<'a>,
+    ) -> Result<(), AllocationError> {
+        match ZoneAllocator::get_slab_idx(layout.size()) {
+            Some(idx) => {
+                self.slabs[idx].insert_slab(new_page);
+                Ok(())
+            }
+            None => Err(AllocationError::InvalidLayout),
+        }
     }
 
     /// Allocate a pointer to a block of memory of size `size` with alignment `align`.
@@ -206,17 +213,10 @@ impl<'a> ZoneAllocator<'a> {
     /// of the requested size or if we do not have enough memory.
     /// In case we are out of memory we try to refill the slab using our local pager
     /// and re-try the allocation request once more before we give up.
-    pub unsafe fn allocate(&mut self, layout: Layout) -> *mut u8 {
+    pub unsafe fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocationError> {
         match self.try_acquire_slab(layout.size()) {
-            Some(idx) => {
-                let mut p = self.slabs[idx].allocate(layout);
-                if p.is_null() {
-                    self.refill_slab_allocator(idx);
-                    p = self.slabs[idx].allocate(layout);
-                }
-                p
-            }
-            None => ptr::null_mut(),
+            Some(idx) => self.slabs[idx].allocate(layout),
+            None => Err(AllocationError::InvalidLayout),
         }
     }
 
@@ -227,14 +227,14 @@ impl<'a> ZoneAllocator<'a> {
     ///  * `old_size` - Size of the block.
     ///  * `align` - Alignment of the block.
     ///
-    pub unsafe fn deallocate<'b>(&'b mut self, ptr: *mut u8, layout: Layout) {
+    pub unsafe fn deallocate<'b>(
+        &'b mut self,
+        ptr: NonNull<u8>,
+        layout: Layout,
+    ) -> Result<(), AllocationError> {
         match self.try_acquire_slab(layout.size()) {
             Some(idx) => self.slabs[idx].deallocate(ptr, layout),
-            None => panic!(
-                "Unable to find slab allocator for size ({}) with ptr {:?}.",
-                layout.size(),
-                ptr
-            ),
+            None => Err(AllocationError::InvalidLayout),
         }
     }
 
@@ -382,15 +382,16 @@ impl<'a> Iterator for ObjectPageIterMut<'a> {
 
 /// A slab allocator allocates elements of a fixed size.
 ///
-/// It has a list of ObjectPage stored inside `slabs` from which
-/// it allocates memory.
+/// It has a 3 lists of ObjectPages from which it can allocate memory.
 pub struct SCAllocator<'a> {
-    /// Allocation size.
+    /// Maximum possible allocation size for this `SCAllocator`.
     size: usize,
-    /// Memory backing store, to request new ObjectPage.
-    pager: &'a Mutex<dyn PageProvider<'a>>,
-    /// List of ObjectPage.
+    /// List of empty ObjectPages (nothing allocated in these).
+    emtpy_slabs: ObjectPageList<'a>,
+    /// List of partially used ObjectPage (some objects allocated but pages are not full).
     slabs: ObjectPageList<'a>,
+    /// List of full ObjectPages (everything allocated in these don't need to search them).
+    full_slabs: ObjectPageList<'a>,
 }
 
 #[test]
@@ -404,21 +405,21 @@ pub fn iter_empty_list() {
 impl<'a> SCAllocator<'a> {
     /// Create a new SCAllocator.
     #[cfg(feature = "unstable")]
-    pub const fn new(size: usize, pager: &'a Mutex<dyn PageProvider<'a>>) -> SCAllocator<'a> {
+    pub const fn new(size: usize) -> SCAllocator<'a> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
         SCAllocator {
-            size: size,
-            pager: pager,
+            size,
+            emtpy_slabs: ObjectPageList::new(),
             slabs: ObjectPageList::new(),
+            full_slabs: ObjectPageList::new(),
         }
     }
     /// Create a new SCAllocator.
     #[cfg(not(feature = "unstable"))]
-    pub fn new(size: usize, pager: &'a Mutex<PageProvider<'a>>) -> SCAllocator<'a> {
+    pub fn new(size: usize) -> SCAllocator<'a> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
         SCAllocator {
-            size: size,
-            pager: pager,
+            size,
             slabs: ObjectPageList::new(),
         }
     }
@@ -428,32 +429,15 @@ impl<'a> SCAllocator<'a> {
         self.size
     }
 
-    /// Try to allocate a new ObjectPage and insert it.
-    ///
-    /// # TODO
-    ///  * Amount is currently ignored.
-    ///  * Panics on OOM (should return error!)
-    fn refill_slab<'b>(&'b mut self, amount: usize) {
-        let mut pager = self.pager.lock();
-        for i in 0..amount {
-            match pager.allocate_page() {
-                Some(new_head) => {
-                    self.insert_slab(new_head);
-                }
-                None => panic!("OOM"),
-            }
-        }
-    }
-
     /// Add a new ObjectPage.
-    pub fn insert_slab<'b>(&'b mut self, new_head: &'a mut ObjectPage<'a>) {
+    pub fn insert_slab(&mut self, new_head: &'a mut ObjectPage<'a>) {
         self.slabs.insert_front(new_head);
     }
 
     /// Tries to allocate a block of memory with respect to the `alignment`.
     ///
     /// Only searches within already allocated slab pages.
-    fn try_allocate_from_pagelist<'b>(&'b mut self, layout: Layout) -> *mut u8 {
+    fn try_allocate_from_pagelist(&mut self, layout: Layout) -> *mut u8 {
         let size = self.size;
         for (idx, slab_page) in self.slabs.iter_mut().enumerate() {
             let ptr = slab_page.allocate(layout);
@@ -471,7 +455,7 @@ impl<'a> SCAllocator<'a> {
     ///
     /// In case of failure will try to grow the slab allocator by requesting
     /// additional pages and re-try the allocation once more before we give up.
-    pub fn allocate<'b>(&'b mut self, layout: Layout) -> *mut u8 {
+    pub fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocationError> {
         trace!(
             "SCAllocator({}) is trying to allocate {:?}",
             self.size,
@@ -483,46 +467,43 @@ impl<'a> SCAllocator<'a> {
         assert!(new_layout.size() >= layout.size());
 
         let ptr = self.try_allocate_from_pagelist(new_layout);
-        if ptr.is_null() {
-            self.refill_slab(1);
-            return self.try_allocate_from_pagelist(layout);
+        let res = NonNull::new(ptr).ok_or(AllocationError::OutOfMemory(layout));
+
+        if !ptr.is_null() {
+            trace!(
+                "SCAllocator({}) allocated ptr=0x{:x}",
+                self.size,
+                ptr as usize
+            );
         }
 
-        trace!(
-            "SCAllocator({}) allocated ptr=0x{:x}",
-            self.size,
-            ptr as usize
-        );
-        return ptr;
+        res
     }
 
     /// Deallocates a previously allocated block.
     ///
     /// # Bug
     /// This never releases memory in case the ObjectPage are provided by the zone.
-    pub fn deallocate<'b>(&'b mut self, ptr: *mut u8, layout: Layout) {
+    pub fn deallocate<'b>(
+        &'b mut self,
+        ptr: NonNull<u8>,
+        layout: Layout,
+    ) -> Result<(), AllocationError> {
+        assert!(layout.size() <= self.size);
+        assert!(self.size <= (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
+
         trace!(
-            "SCAllocator({}) is trying to deallocate ptr = 0x{:x} layout={:?}",
+            "SCAllocator({}) is trying to deallocate ptr = {:p} layout={:?}",
             self.size,
-            ptr as usize,
+            ptr,
             layout
         );
-        assert!(layout.size() <= self.size);
 
-        let page = (ptr as usize) & !(BASE_PAGE_SIZE - 1) as usize;
+        let page = (ptr.as_ptr() as usize) & !(BASE_PAGE_SIZE - 1) as usize;
         let slab_page = unsafe { mem::transmute::<VAddr, &'a mut ObjectPage>(page) };
-
-        assert!(self.size <= (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
 
-        slab_page.deallocate(ptr, new_layout);
-
-        // Drop page in case it is empty and not the last
-        if slab_page.is_empty() && self.slabs.elements > 1 {
-            self.slabs.remove_from_list(slab_page);
-            let mut pager = self.pager.lock();
-            pager.release_page(slab_page);
-        }
+        slab_page.deallocate(ptr, new_layout)
     }
 }
 
@@ -625,21 +606,15 @@ impl<'a> ObjectPage<'a> {
     }
 
     /// Deallocates a memory object within this page.
-    fn deallocate(&mut self, ptr: *mut u8, layout: Layout) {
-        trace!(
-            "ObjectPage deallocating ptr = 0x{:x} with {:?}",
-            ptr as usize,
-            layout
-        );
-        let page_offset = (ptr as usize) & 0xfff;
+    fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
+        trace!("ObjectPage deallocating ptr = {:p} with {:?}", ptr, layout);
+        let page_offset = (ptr.as_ptr() as usize) & 0xfff;
         assert!(page_offset % layout.size() == 0);
         let idx = page_offset / layout.size();
-        assert!(
-            self.is_allocated(idx),
-            "ptr = 0x{:x} was not allocated",
-            ptr as usize
-        );
+        assert!(self.is_allocated(idx), "{:p} not marked allocated?", ptr);
+
         self.clear_bit(idx);
+        Ok(())
     }
 
     /// Tries to allocate an object within this page.
@@ -649,7 +624,7 @@ impl<'a> ObjectPage<'a> {
         match self.first_fit(layout) {
             Some((idx, addr)) => {
                 self.set_bit(idx);
-                unsafe { mem::transmute::<usize, *mut u8>(addr) }
+                addr as *mut u8
             }
             None => ptr::null_mut(),
         }
