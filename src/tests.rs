@@ -1,7 +1,6 @@
 use env_logger;
 use libc;
 use rand;
-use spin::Mutex;
 use std::alloc;
 use std::alloc::Layout;
 use std::mem::{size_of, transmute};
@@ -98,6 +97,7 @@ macro_rules! test_sc_allocation {
     ($test:ident, $size:expr, $alignment:expr, $allocations:expr) => {
         #[test]
         fn $test() {
+            let _ = env_logger::try_init();
             let mut mmap = MmapPageProvider::new();
             {
                 let mut sa: SCAllocator = SCAllocator::new($size);
@@ -121,7 +121,9 @@ macro_rules! test_sc_allocation {
                             // Couldn't allocate need to refill first
                             Err(AllocationError::OutOfMemory(_)) => {
                                 let page = mmap.allocate_page().unwrap();
-                                sa.insert_slab(page);
+                                unsafe {
+                                    sa.refill(page);
+                                }
                             }
                             // Unexpected errors
                             Err(AllocationError::InvalidLayout) => unreachable!("Unexpected error"),
@@ -153,7 +155,7 @@ macro_rules! test_sc_allocation {
 
                 // Deallocate all the objects
                 for item in objects.iter_mut() {
-                    sa.deallocate(*item, layout);
+                    sa.deallocate(*item, layout).expect("Can't deallocate");
                 }
 
                 objects.clear();
@@ -173,7 +175,9 @@ macro_rules! test_sc_allocation {
                             // Couldn't allocate need to refill first
                             Err(AllocationError::OutOfMemory(_)) => {
                                 let page = mmap.allocate_page().unwrap();
-                                sa.insert_slab(page);
+                                unsafe {
+                                    sa.refill(page);
+                                }
                             }
                             // Unexpected errors
                             Err(AllocationError::InvalidLayout) => unreachable!("Unexpected error"),
@@ -190,15 +194,20 @@ macro_rules! test_sc_allocation {
 
                 // Deallocate everything once more
                 for item in objects.iter_mut() {
-                    sa.deallocate(*item, layout);
+                    sa.deallocate(*item, layout).expect("Can't deallocate");
+                }
+
+                // Drain the slab-allocator and give unused pages back to the OS
+                while let Some(page) = sa.empty_slabs.pop() {
+                    mmap.release_page(page);
                 }
             }
 
             // Check that we released everything to our page allocator:
             assert_eq!(
                 mmap.currently_allocated(),
-                1,
-                "Released all but one page to underlying memory manager."
+                0,
+                "Released all pages to the underlying memory manager."
             );
         }
     };
@@ -223,7 +232,7 @@ test_sc_allocation!(test_sc_allocation10000_size512_alignment1, 512, 1, 10000);
 #[test]
 #[should_panic]
 fn invalid_alignment() {
-    let layout = Layout::from_size_align(10, 3).unwrap();
+    let _layout = Layout::from_size_align(10, 3).unwrap();
 }
 
 #[test]
@@ -236,13 +245,28 @@ fn test_readme() -> Result<(), AllocationError> {
 
     let mut zone = ZoneAllocator::new();
     let layout = Layout::from_size_align(object_size, alignment).unwrap();
-    zone.refill(layout, page.unwrap());
+    unsafe { zone.refill(layout, page.unwrap())? };
 
+    let allocated = zone.allocate(layout)?;
+    zone.deallocate(allocated, layout)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_readme2() -> Result<(), AllocationError> {
+    let object_size = 10;
+    let alignment = 8;
+    let layout = Layout::from_size_align(object_size, alignment).unwrap();
+    let mut mmap = MmapPageProvider::new();
+    let page = mmap.allocate_page();
+
+    let mut sa: SCAllocator = SCAllocator::new(object_size);
     unsafe {
-        let allocated = zone.allocate(layout)?;
-        zone.deallocate(allocated, layout)?;
+        sa.refill(page.unwrap());
     }
 
+    sa.allocate(layout)?;
     Ok(())
 }
 
@@ -254,30 +278,15 @@ fn test_bug1() -> Result<(), AllocationError> {
     let page = mmap.allocate_page();
 
     let mut sa: SCAllocator = SCAllocator::new(8);
-    sa.insert_slab(page.unwrap());
+    unsafe {
+        sa.refill(page.unwrap());
+    }
 
     let ptr1 = sa.allocate(Layout::from_size_align(1, 1).unwrap())?;
     let ptr2 = sa.allocate(Layout::from_size_align(2, 1).unwrap())?;
     sa.deallocate(ptr1, Layout::from_size_align(1, 1).unwrap())?;
-    let ptr3 = sa.allocate(Layout::from_size_align(4, 1).unwrap())?;
+    let _ptr3 = sa.allocate(Layout::from_size_align(4, 1).unwrap())?;
     sa.deallocate(ptr2, Layout::from_size_align(2, 1).unwrap())
-}
-
-#[test]
-fn test_readme2() -> Result<(), AllocationError> {
-    let _ = env_logger::try_init();
-
-    let object_size = 10;
-    let alignment = 8;
-    let layout = Layout::from_size_align(object_size, alignment).unwrap();
-    let mut mmap = MmapPageProvider::new();
-    let page = mmap.allocate_page();
-
-    let mut sa: SCAllocator = SCAllocator::new(object_size);
-    sa.insert_slab(page.unwrap());
-
-    sa.allocate(layout)?;
-    Ok(())
 }
 
 #[bench]
@@ -289,11 +298,13 @@ fn bench_allocate(b: &mut Bencher) {
     let layout = Layout::from_size_align(8, 1).unwrap();
 
     let page = mmap.allocate_page();
-    sa.insert_slab(page.unwrap());
+    unsafe {
+        sa.refill(page.unwrap());
+    }
 
     b.iter(|| {
         let ptr = sa.allocate(layout).expect("Can't allocate");
-        sa.deallocate(ptr, layout);
+        sa.deallocate(ptr, layout).expect("Can't deallocate");
     });
 }
 
@@ -305,12 +316,14 @@ fn bench_allocate_big(b: &mut Bencher) {
     let mut sa: SCAllocator = SCAllocator::new(512);
 
     let page = mmap.allocate_page();
-    sa.insert_slab(page.unwrap());
+    unsafe {
+        sa.refill(page.unwrap());
+    }
 
     let layout = Layout::from_size_align(512, 1).unwrap();
     b.iter(|| {
         let ptr = sa.allocate(layout).expect("Can't allocate");
-        sa.deallocate(ptr, layout);
+        sa.deallocate(ptr, layout).expect("Can't deallocate");
     });
 }
 
@@ -328,4 +341,60 @@ pub fn check_first_fit() {
     let op: ObjectPage = Default::default();
     let layout = Layout::from_size_align(8, 8).unwrap();
     println!("{:?}", op.first_fit(layout));
+}
+
+#[test]
+fn list_pop() {
+    let mut op1: ObjectPage = Default::default();
+    let op1_ptr = &op1 as *const ObjectPage<'_>;
+    let mut op2: ObjectPage = Default::default();
+    let op2_ptr = &op2 as *const ObjectPage<'_>;
+    let mut op3: ObjectPage = Default::default();
+    let op3_ptr = &op3 as *const ObjectPage<'_>;
+    let mut op4: ObjectPage = Default::default();
+    let op4_ptr = &op4 as *const ObjectPage<'_>;
+
+    let mut list: ObjectPageList = ObjectPageList::new();
+    list.insert_front(&mut op1);
+    list.insert_front(&mut op2);
+    list.insert_front(&mut op3);
+
+    assert!(list.contains(op1_ptr));
+    assert!(list.contains(op2_ptr));
+    assert!(list.contains(op3_ptr));
+    assert!(!list.contains(op4_ptr));
+
+    let popped = list.pop();
+    assert_eq!(popped.unwrap() as *const ObjectPage, op3_ptr);
+    assert!(!list.contains(op3_ptr));
+
+    let popped = list.pop();
+    assert_eq!(popped.unwrap() as *const ObjectPage, op2_ptr);
+    assert!(!list.contains(op2_ptr));
+
+    list.insert_front(&mut op4);
+    assert!(list.contains(op4_ptr));
+    let popped = list.pop();
+    assert_eq!(popped.unwrap() as *const ObjectPage, op4_ptr);
+    assert!(!list.contains(op4_ptr));
+
+    let popped = list.pop();
+    assert_eq!(popped.unwrap() as *const ObjectPage, op1_ptr);
+    assert!(!list.contains(op1_ptr));
+
+    let popped = list.pop();
+    assert!(popped.is_none());
+
+    assert!(!list.contains(op1_ptr));
+    assert!(!list.contains(op2_ptr));
+    assert!(!list.contains(op3_ptr));
+    assert!(!list.contains(op4_ptr));
+}
+
+#[test]
+pub fn iter_empty_list() {
+    let mut new_head1: ObjectPage = Default::default();
+    let mut l = ObjectPageList::new();
+    l.insert_front(&mut new_head1);
+    for _p in l.iter_mut() {}
 }

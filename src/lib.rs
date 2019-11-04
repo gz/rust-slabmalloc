@@ -9,29 +9,22 @@
 //!    It holds its data in a ObjectPageList.
 //!  * A `ObjectPage` contains allocated objects and associated meta-data.
 //!
-#![allow(unused_features, dead_code, unused_variables)]
+#![allow(unused_features)]
 #![cfg_attr(feature = "unstable", feature(const_fn))]
-#![cfg_attr(test, feature(prelude_import, test, raw, libc, c_void_variant))]
+#![cfg_attr(
+    test,
+    feature(prelude_import, test, raw, libc, c_void_variant, core_intrinsics)
+)]
 #![no_std]
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
-
-extern crate spin;
-#[macro_use]
-extern crate log;
-
-#[cfg(test)]
-extern crate env_logger;
 
 #[cfg(test)]
 #[macro_use]
 extern crate std;
 #[cfg(test)]
-extern crate libc;
-#[cfg(test)]
-extern crate rand;
-#[cfg(test)]
 extern crate test;
+
 #[cfg(test)]
 mod tests;
 
@@ -39,6 +32,8 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::fmt;
 use core::mem;
 use core::ptr::{self, NonNull};
+
+use log::trace;
 use spin::Mutex;
 
 #[cfg(target_arch = "x86_64")]
@@ -78,7 +73,7 @@ unsafe impl GlobalAlloc for SafeZoneAllocator {
         assert!(layout.align().is_power_of_two());
         match self.0.lock().allocate(layout) {
             Ok(nptr) => nptr.as_ptr(),
-            Err(AllocationError::OutOfMemory(l)) => panic!("No memory in slabs, needs refilling"),
+            Err(AllocationError::OutOfMemory(_l)) => panic!("No memory in slabs, needs refilling"),
             Err(AllocationError::InvalidLayout) => panic!("Can't allocate this size"),
         }
     }
@@ -145,6 +140,7 @@ impl<'a> ZoneAllocator<'a> {
     /// Return maximum size an object of size `current_size` can use.
     ///
     /// Used to optimize `realloc`.
+    #[allow(dead_code)]
     fn get_max_size(current_size: usize) -> Option<usize> {
         match current_size {
             0..=8 => Some(8),
@@ -193,14 +189,17 @@ impl<'a> ZoneAllocator<'a> {
     }
 
     /// Refills the SCAllocator for a given Layouyt with an ObjectPage.
-    pub fn refill(
+    ///
+    /// # Safety
+    /// ObjectPage needs to be emtpy etc.
+    pub unsafe fn refill(
         &mut self,
         layout: Layout,
         new_page: &'a mut ObjectPage<'a>,
     ) -> Result<(), AllocationError> {
         match ZoneAllocator::get_slab_idx(layout.size()) {
             Some(idx) => {
-                self.slabs[idx].insert_slab(new_page);
+                self.slabs[idx].insert_empty(new_page);
                 Ok(())
             }
             None => Err(AllocationError::InvalidLayout),
@@ -213,7 +212,7 @@ impl<'a> ZoneAllocator<'a> {
     /// of the requested size or if we do not have enough memory.
     /// In case we are out of memory we try to refill the slab using our local pager
     /// and re-try the allocation request once more before we give up.
-    pub unsafe fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocationError> {
+    pub fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocationError> {
         match self.try_acquire_slab(layout.size()) {
             Some(idx) => self.slabs[idx].allocate(layout),
             None => Err(AllocationError::InvalidLayout),
@@ -227,44 +226,12 @@ impl<'a> ZoneAllocator<'a> {
     ///  * `old_size` - Size of the block.
     ///  * `align` - Alignment of the block.
     ///
-    pub unsafe fn deallocate<'b>(
-        &'b mut self,
-        ptr: NonNull<u8>,
-        layout: Layout,
-    ) -> Result<(), AllocationError> {
+    pub fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
         match self.try_acquire_slab(layout.size()) {
             Some(idx) => self.slabs[idx].deallocate(ptr, layout),
             None => Err(AllocationError::InvalidLayout),
         }
     }
-
-    unsafe fn copy(dest: *mut u8, src: *const u8, n: usize) {
-        let mut i = 0;
-        while i < n {
-            *dest.offset(i as isize) = *src.offset(i as isize);
-            i += 1;
-        }
-    }
-
-    /*pub unsafe fn reallocate<'b>(&'b mut self, ptr: *mut u8, old_size: usize, size: usize, align: usize) -> Option<*mut u8> {
-        // Return immediately in case we can still fit the new request in the current buffer
-        match ZoneAllocator::get_max_size(old_size) {
-            Some(max_size) => {
-                if max_size >= size {
-                    return Some(ptr);
-                }
-                ()
-            },
-            None => ()
-        };
-
-        // Otherwise allocate, copy, free:
-        self.allocate(size, align).map(|new| {
-            ZoneAllocator::copy(new, ptr, old_size);
-            self.deallocate(NonNull::new_unchecked(ptr as *mut u8), old_size, align);
-            new
-        })
-    }*/
 }
 
 /// A list of ObjectPage.
@@ -343,11 +310,34 @@ impl<'a> ObjectPageList<'a> {
             }
         }
 
+        slab_page.prev = Rawlink::none();
+        slab_page.next = Rawlink::none();
         self.elements -= 1;
     }
 
+    /// Removes `slab_page` from the list.
+    fn pop<'b, 'c>(&'b mut self) -> Option<&'c mut ObjectPage<'a>> {
+        match self.head {
+            None => None,
+            Some(ref mut head) => {
+                let mut new_head = unsafe { head.next.resolve_mut() };
+                mem::swap(&mut self.head, &mut new_head);
+                let _ = self.head.as_mut().map(|n| {
+                    n.prev = Rawlink::none();
+                });
+
+                self.elements -= 1;
+                new_head.map(|node| {
+                    node.prev = Rawlink::none();
+                    node.next = Rawlink::none();
+                    node
+                })
+            }
+        }
+    }
+
     /// Does the list contain `s`?
-    fn has_objectpage<'b>(&'b mut self, s: &'a ObjectPage<'a>) -> bool {
+    fn contains(&mut self, s: *const ObjectPage<'a>) -> bool {
         for slab_page in self.iter_mut() {
             if slab_page as *const ObjectPage == s as *const ObjectPage {
                 return true;
@@ -383,23 +373,29 @@ impl<'a> Iterator for ObjectPageIterMut<'a> {
 /// A slab allocator allocates elements of a fixed size.
 ///
 /// It has a 3 lists of ObjectPages from which it can allocate memory.
+///
+///  * `empty_slabs`: Is a list of pages that the SCAllocator maintains, but
+///    has 0 allocations in them, these can be given back to a requestor in case
+///    of reclamation.
+///  * `slabs`: A list of pages partially allocated and still have room for more.
+///  * `full_slabs`: A list of pages that are completely allocated.
+///
+/// On allocation we allocate memory from `slabs`, however if the list is empty
+/// we try to reclaim a page from `empty_slabs` before we return with an out-of-memory
+/// error. If a page becomes full after the allocation we move it from `slabs` to
+/// `full_slabs`.
+///
+/// Similarly, on dealloaction we might move a page from `full_slabs` to `slabs`
+/// or from `slabs` to `empty_slabs` after we deallocated an object.
 pub struct SCAllocator<'a> {
     /// Maximum possible allocation size for this `SCAllocator`.
     size: usize,
     /// List of empty ObjectPages (nothing allocated in these).
-    emtpy_slabs: ObjectPageList<'a>,
+    empty_slabs: ObjectPageList<'a>,
     /// List of partially used ObjectPage (some objects allocated but pages are not full).
     slabs: ObjectPageList<'a>,
     /// List of full ObjectPages (everything allocated in these don't need to search them).
     full_slabs: ObjectPageList<'a>,
-}
-
-#[test]
-pub fn iter_empty_list() {
-    let mut new_head1: ObjectPage = Default::default();
-    let mut l = ObjectPageList::new();
-    l.insert_front(&mut new_head1);
-    for p in l.iter_mut() {}
 }
 
 impl<'a> SCAllocator<'a> {
@@ -409,7 +405,7 @@ impl<'a> SCAllocator<'a> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
         SCAllocator {
             size,
-            emtpy_slabs: ObjectPageList::new(),
+            empty_slabs: ObjectPageList::new(),
             slabs: ObjectPageList::new(),
             full_slabs: ObjectPageList::new(),
         }
@@ -429,19 +425,89 @@ impl<'a> SCAllocator<'a> {
         self.size
     }
 
+    /// Refill the SCAllocator
+    ///
+    /// # Safety
+    /// ObjectPage needs to be empty etc.
+    pub unsafe fn refill(&mut self, page: &'a mut ObjectPage<'a>) {
+        trace!("added page to SCAllocator {:p}", page);
+        self.insert_empty(page);
+    }
+
     /// Add a new ObjectPage.
-    pub fn insert_slab(&mut self, new_head: &'a mut ObjectPage<'a>) {
+    fn insert_partial_slab(&mut self, new_head: &'a mut ObjectPage<'a>) {
         self.slabs.insert_front(new_head);
+    }
+
+    /// Add page to empty list.
+    fn insert_empty(&mut self, new_head: &'a mut ObjectPage<'a>) {
+        self.empty_slabs.insert_front(new_head);
+    }
+
+    /// Move a page from `slabs` to `empty_slabs`.
+    fn move_to_empty(&mut self, page: &'a mut ObjectPage<'a>) {
+        debug_assert!(page.is_empty());
+        let page_ptr = page as *const ObjectPage;
+
+        debug_assert!(self.slabs.contains(page_ptr));
+        debug_assert!(
+            !self.empty_slabs.contains(page_ptr),
+            "Page {:p} already in emtpy_slabs",
+            page_ptr
+        );
+
+        self.slabs.remove_from_list(page);
+        self.empty_slabs.insert_front(page);
+
+        debug_assert!(!self.slabs.contains(page_ptr));
+        debug_assert!(self.empty_slabs.contains(page_ptr));
+    }
+
+    /// Move a page from `full_slabs` to `slab`.
+    fn move_partial_to_full(&mut self, page: &'a mut ObjectPage<'a>) {
+        debug_assert!(page.is_full());
+        let page_ptr = page as *const ObjectPage;
+
+        debug_assert!(self.slabs.contains(page_ptr));
+        debug_assert!(!self.full_slabs.contains(page_ptr));
+
+        self.slabs.remove_from_list(page);
+        self.full_slabs.insert_front(page);
+
+        debug_assert!(!self.slabs.contains(page_ptr));
+        debug_assert!(self.full_slabs.contains(page_ptr));
+    }
+
+    /// Move a page from `full_slabs` to `slab`.
+    fn move_full_to_partial(&mut self, page: &'a mut ObjectPage<'a>) {
+        debug_assert!(!page.is_full());
+        let page_ptr = page as *const ObjectPage;
+
+        debug_assert!(!self.slabs.contains(page_ptr));
+        debug_assert!(self.full_slabs.contains(page_ptr));
+
+        self.full_slabs.remove_from_list(page);
+        self.slabs.insert_front(page);
+
+        debug_assert!(self.slabs.contains(page_ptr));
+        debug_assert!(!self.full_slabs.contains(page_ptr));
     }
 
     /// Tries to allocate a block of memory with respect to the `alignment`.
     ///
     /// Only searches within already allocated slab pages.
     fn try_allocate_from_pagelist(&mut self, layout: Layout) -> *mut u8 {
-        let size = self.size;
-        for (idx, slab_page) in self.slabs.iter_mut().enumerate() {
+        // TODO: Do we really need to check multiple slab pages (due to alignment)
+        // If not we can get away with a singly-linked list and have 8 more bytes
+        // for the bitfield in an ObjectPage.
+        for slab_page in self.slabs.iter_mut() {
             let ptr = slab_page.allocate(layout);
             if !ptr.is_null() {
+                if slab_page.is_full() {
+                    trace!("move {:p} partial -> full", slab_page);
+                    self.move_partial_to_full(slab_page);
+                }
+
                 return ptr;
             } else {
                 continue;
@@ -466,7 +532,31 @@ impl<'a> SCAllocator<'a> {
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
         assert!(new_layout.size() >= layout.size());
 
-        let ptr = self.try_allocate_from_pagelist(new_layout);
+        let ptr = {
+            // Try to allocate from partial slabs,
+            // if we fail check if we have empty pages and allocate from there
+            let ptr = self.try_allocate_from_pagelist(new_layout);
+            if ptr.is_null() && self.empty_slabs.head.is_some() {
+                // Re-try allocation in empty page
+                let empty_page = self.empty_slabs.pop().expect("We checked head.is_some()");
+                debug_assert!(!self.empty_slabs.contains(empty_page));
+
+                let ptr = empty_page.allocate(layout);
+                debug_assert!(!ptr.is_null(), "Allocation must have succeeded here.");
+
+                trace!(
+                    "move {:p} empty -> partial empty count {}",
+                    empty_page,
+                    self.empty_slabs.elements
+                );
+                // Move empty page to partial pages
+                self.insert_partial_slab(empty_page);
+                ptr
+            } else {
+                ptr
+            }
+        };
+
         let res = NonNull::new(ptr).ok_or(AllocationError::OutOfMemory(layout));
 
         if !ptr.is_null() {
@@ -481,17 +571,9 @@ impl<'a> SCAllocator<'a> {
     }
 
     /// Deallocates a previously allocated block.
-    ///
-    /// # Bug
-    /// This never releases memory in case the ObjectPage are provided by the zone.
-    pub fn deallocate<'b>(
-        &'b mut self,
-        ptr: NonNull<u8>,
-        layout: Layout,
-    ) -> Result<(), AllocationError> {
+    pub fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
         assert!(layout.size() <= self.size);
         assert!(self.size <= (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
-
         trace!(
             "SCAllocator({}) is trying to deallocate ptr = {:p} layout={:?}",
             self.size,
@@ -500,10 +582,27 @@ impl<'a> SCAllocator<'a> {
         );
 
         let page = (ptr.as_ptr() as usize) & !(BASE_PAGE_SIZE - 1) as usize;
+
+        // Figure out which page we are on and construct a reference to it
+        // TODO: The linked list will have another &mut reference
         let slab_page = unsafe { mem::transmute::<VAddr, &'a mut ObjectPage>(page) };
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
 
-        slab_page.deallocate(ptr, new_layout)
+        let slab_page_was_full = slab_page.is_full();
+        let ret = slab_page.deallocate(ptr, new_layout);
+        debug_assert!(ret.is_ok(), "Slab page deallocate won't fail at the moment");
+
+        if slab_page.is_empty() {
+            // We need to move it from self.slabs -> self.empty_slabs
+            trace!("move {:p} partial -> empty", slab_page);
+            self.move_to_empty(slab_page);
+        } else if slab_page_was_full {
+            // We need to move it from self.full_slabs -> self.slabs
+            trace!("move {:p} full -> partial", slab_page);
+            self.move_full_to_partial(slab_page);
+        }
+
+        ret
     }
 }
 
@@ -515,6 +614,7 @@ impl<'a> SCAllocator<'a> {
 #[repr(packed)]
 pub struct ObjectPage<'a> {
     /// Holds memory objects.
+    #[allow(dead_code)]
     data: [u8; 4096 - 64],
 
     /// Next element in list (used by `ObjectPageList`).
@@ -633,6 +733,8 @@ impl<'a> ObjectPage<'a> {
     /// Checks if we can still allocate more objects within the page.
     fn is_full(&self) -> bool {
         unsafe {
+            // TODO(performance?): rather than scanning everything abort
+            // after the first u64 bit value that has a free bit
             self.bitfield
                 .iter()
                 .filter(|&x| *x != u64::max_value())
@@ -641,17 +743,10 @@ impl<'a> ObjectPage<'a> {
         }
     }
 
-    /// Checks if the page has currently no allocation.
+    /// Checks if the page has currently no allocations.
     fn is_empty(&self) -> bool {
         unsafe { self.bitfield.iter().filter(|&x| *x > 0x0).count() == 0 }
     }
-}
-
-#[test]
-pub fn check_first_fit() {
-    let op: ObjectPage = Default::default();
-    let layout = Layout::from_size_align(8, 8).unwrap();
-    println!("{:?}", op.first_fit(layout));
 }
 
 /// Rawlink is a type like Option<T> but for holding a raw pointer
@@ -682,6 +777,7 @@ impl<T> Rawlink<T> {
     ///
     /// - Dereference of raw pointer.
     /// - Returns reference of arbitrary lifetime.
+    #[allow(dead_code)]
     unsafe fn resolve<'a>(&self) -> Option<&'a T> {
         self.p.as_ref()
     }
@@ -697,6 +793,7 @@ impl<T> Rawlink<T> {
     }
 
     /// Return the `Rawlink` and replace with `Rawlink::none()`
+    #[allow(dead_code)]
     fn take(&mut self) -> Rawlink<T> {
         mem::replace(self, Rawlink::none())
     }

@@ -20,15 +20,16 @@ static MEM_PROVIDER: SafeZoneAllocator = SafeZoneAllocator::new(&PAGER);
 ```rust
 let object_size = 12;
 let alignment = 4;
-let mmap = Mutex::new(MmapPageProvider::new());
-let mut zone = ZoneAllocator::new(&mmap);
 
-unsafe {
-  let layout = Layout::from_size_align(object_size, alignment).unwrap();
-  let allocated = zone.allocate(layout);
-  assert!(!allocated.is_null());
-  zone.deallocate(allocated, layout);
-}
+let mut mmap = MmapPageProvider::new();
+let page = mmap.allocate_page();
+
+let mut zone = ZoneAllocator::new();
+let layout = Layout::from_size_align(object_size, alignment).unwrap();
+unsafe { zone.refill(layout, page.unwrap())? };  // Pre-load SCAllocator with memory
+
+let allocated = zone.allocate(layout)?;
+zone.deallocate(allocated, layout)?;
 ```
 
 * Use the SCAllocator to allocate fixed sized objects:
@@ -36,9 +37,15 @@ unsafe {
 let object_size = 10;
 let alignment = 8;
 let layout = Layout::from_size_align(object_size, alignment).unwrap();
-let mut mmap = Mutex::new(MmapPageProvider::new());
-let mut sa: SCAllocator = SCAllocator::new(object_size, &mut mmap);
-sa.allocate(layout);
+let mut mmap = MmapPageProvider::new();
+let page = mmap.allocate_page();
+
+let mut sa: SCAllocator = SCAllocator::new(object_size);
+unsafe {
+    sa.refill(page.unwrap());
+}
+
+sa.allocate(layout)?;
 ```
 
 ## Using on stable
