@@ -13,7 +13,7 @@ needs to provide is the  necessary mechanism to allocate and free 4KiB frames
 ```rust
 use slabmalloc::{SafeZoneAllocator};
 #[global_allocator]
-static MEM_PROVIDER: SafeZoneAllocator = SafeZoneAllocator::new(&PAGER);
+static MEM_PROVIDER: SafeZoneAllocator = SafeZoneAllocator::new();
 ```
 
 * Use the ZoneAllocator to allocate arbitrary sized objects:
