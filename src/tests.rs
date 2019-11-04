@@ -239,13 +239,13 @@ fn invalid_alignment() {
 fn test_readme() -> Result<(), AllocationError> {
     let object_size = 12;
     let alignment = 4;
+    let layout = Layout::from_size_align(object_size, alignment).unwrap();
 
     let mut mmap = MmapPageProvider::new();
-    let page = mmap.allocate_page();
+    let page = mmap.allocate_page().expect("Can't allocate a page");
 
     let mut zone = ZoneAllocator::new();
-    let layout = Layout::from_size_align(object_size, alignment).unwrap();
-    unsafe { zone.refill(layout, page.unwrap())? };
+    unsafe { zone.refill(layout, page)? };
 
     let allocated = zone.allocate(layout)?;
     zone.deallocate(allocated, layout)?;
@@ -258,13 +258,12 @@ fn test_readme2() -> Result<(), AllocationError> {
     let object_size = 10;
     let alignment = 8;
     let layout = Layout::from_size_align(object_size, alignment).unwrap();
+
     let mut mmap = MmapPageProvider::new();
-    let page = mmap.allocate_page();
+    let page = mmap.allocate_page().expect("Can't allocate a page");
 
     let mut sa: SCAllocator = SCAllocator::new(object_size);
-    unsafe {
-        sa.refill(page.unwrap());
-    }
+    unsafe { sa.refill(page) };
 
     sa.allocate(layout)?;
     Ok(())
