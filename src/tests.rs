@@ -70,10 +70,17 @@ impl<'a> PageProvider<'a> for MmapPageProvider {
 
 #[test]
 fn check_size() {
-    assert!(
-        BASE_PAGE_SIZE as usize == size_of::<ObjectPage>(),
+    assert_eq!(
+        BASE_PAGE_SIZE as usize,
+        size_of::<ObjectPage>(),
         "ObjectPage should be exactly the size of a single page."
     );
+
+    /*assert_eq!(
+        LARGE_PAGE_SIZE as usize,
+        size_of::<LargeObjectPage>(),
+        "LargeObjectPage should be exactly the size of a large-page."
+    );*/
 }
 
 #[test]
@@ -289,7 +296,7 @@ fn test_bug1() -> Result<(), AllocationError> {
 }
 
 #[bench]
-fn bench_allocate(b: &mut Bencher) {
+fn slabmalloc_allocate_deallocate(b: &mut Bencher) {
     let _ = env_logger::try_init();
 
     let mut mmap = MmapPageProvider::new();
@@ -301,14 +308,17 @@ fn bench_allocate(b: &mut Bencher) {
         sa.refill(page.unwrap());
     }
 
+    let ptr = sa.allocate(layout).expect("Can't allocate");
+    test::black_box(ptr);
     b.iter(|| {
         let ptr = sa.allocate(layout).expect("Can't allocate");
+        test::black_box(ptr);
         sa.deallocate(ptr, layout).expect("Can't deallocate");
     });
 }
 
 #[bench]
-fn bench_allocate_big(b: &mut Bencher) {
+fn slabmalloc_allocate_deallocate_big(b: &mut Bencher) {
     let _ = env_logger::try_init();
 
     let mut mmap = MmapPageProvider::new();
@@ -320,17 +330,38 @@ fn bench_allocate_big(b: &mut Bencher) {
     }
 
     let layout = Layout::from_size_align(512, 1).unwrap();
+    let ptr = sa.allocate(layout).expect("Can't allocate");
+    test::black_box(ptr);
+
     b.iter(|| {
         let ptr = sa.allocate(layout).expect("Can't allocate");
+        test::black_box(ptr);
         sa.deallocate(ptr, layout).expect("Can't deallocate");
     });
 }
 
 #[bench]
-fn compare_vs_alloc(b: &mut Bencher) {
+fn jemalloc_allocate_deallocate(b: &mut Bencher) {
     let layout = Layout::from_size_align(8, 1).unwrap();
+    let ptr = unsafe { alloc::alloc(layout) };
+    test::black_box(ptr);
+
     b.iter(|| unsafe {
         let ptr = alloc::alloc(layout);
+        test::black_box(ptr);
+        alloc::dealloc(ptr, layout);
+    });
+}
+
+#[bench]
+fn jemalloc_allocate_deallocate_big(b: &mut Bencher) {
+    let layout = Layout::from_size_align(512, 1).unwrap();
+    let ptr = unsafe { alloc::alloc(layout) };
+    test::black_box(ptr);
+
+    b.iter(|| unsafe {
+        let ptr = alloc::alloc(layout);
+        test::black_box(ptr);
         alloc::dealloc(ptr, layout);
     });
 }

@@ -8,7 +8,6 @@
 //!  * A `SCAllocator` allocates objects of exactly one size.
 //!    It holds its data in a ObjectPageList.
 //!  * A `ObjectPage` contains allocated objects and associated meta-data.
-//!
 #![allow(unused_features)]
 #![cfg_attr(feature = "unstable", feature(const_fn))]
 #![cfg_attr(
@@ -41,6 +40,10 @@ const CACHE_LINE_SIZE: usize = 64;
 
 #[cfg(target_arch = "x86_64")]
 const BASE_PAGE_SIZE: usize = 4096;
+
+#[cfg(target_arch = "x86_64")]
+#[allow(unused)]
+const LARGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
 
 #[cfg(target_arch = "x86_64")]
 type VAddr = usize;
@@ -507,7 +510,6 @@ impl<'a> SCAllocator<'a> {
                     trace!("move {:p} partial -> full", slab_page);
                     self.move_partial_to_full(slab_page);
                 }
-
                 return ptr;
             } else {
                 continue;
@@ -606,12 +608,105 @@ impl<'a> SCAllocator<'a> {
     }
 }
 
+/// A trait defining bitfield operations we need for tracking allocated objects within a page.
+trait Bitfield {
+    fn first_fit(&self, base_addr: usize, layout: Layout) -> Option<(usize, usize)>;
+    fn is_allocated(&self, idx: usize) -> bool;
+    fn set_bit(&mut self, idx: usize);
+    fn clear_bit(&mut self, idx: usize);
+    fn is_full(&self) -> bool;
+    fn all_free(&self) -> bool;
+}
+
+/// Implementation of bit operations on [u64] arrays.
+impl Bitfield for [u64] {
+    /// Tries to find a free block of memory that satisfies `alignment` requirement.
+    ///
+    /// # Notes
+    /// * We pass size here to be able to calculate the resulting address within `data`.
+    #[inline(always)]
+    fn first_fit(&self, base_addr: usize, layout: Layout) -> Option<(usize, usize)> {
+        for (base_idx, b) in self.iter().enumerate() {
+            let bitval = *b;
+            if bitval == u64::max_value() {
+                continue;
+            } else {
+                let negated = !bitval;
+                let first_free = negated.trailing_zeros() as usize;
+                let idx: usize = base_idx * 64 + first_free;
+                let offset = idx * layout.size();
+
+                let offset_inside_data_area =
+                    offset <= (BASE_PAGE_SIZE - CACHE_LINE_SIZE - layout.size());
+                if !offset_inside_data_area {
+                    return None;
+                }
+
+                let addr: usize = base_addr + offset;
+                let alignment_ok = addr % layout.align() == 0;
+                let block_is_free = bitval & (1 << first_free) == 0;
+                if alignment_ok && block_is_free {
+                    return Some((idx, addr));
+                }
+            }
+        }
+        None
+    }
+
+    /// Check if the bit `idx` is set.
+    #[inline(always)]
+    fn is_allocated(&self, idx: usize) -> bool {
+        let base_idx = idx / 64;
+        let bit_idx = idx % 64;
+        (self[base_idx] & (1 << bit_idx)) > 0
+    }
+
+    /// Sets the bit number `idx` in the bit-field.
+    #[inline(always)]
+    fn set_bit(&mut self, idx: usize) {
+        let base_idx = idx / 64;
+        let bit_idx = idx % 64;
+        self[base_idx] |= 1 << bit_idx;
+    }
+
+    /// Clears bit number `idx` in the bit-field.
+    #[inline(always)]
+    fn clear_bit(&mut self, idx: usize) {
+        let base_idx = idx / 64;
+        let bit_idx = idx % 64;
+        self[base_idx] &= !(1 << bit_idx);
+    }
+
+    /// Checks if we can still allocate more objects within the page.
+    #[inline(always)]
+    fn is_full(&self) -> bool {
+        // TODO(performance?): rather than scanning everything abort
+        // after the first u64 bit value that has a free bit
+        // TODO(correctness): This may never report full if a size
+        // class does not use all bits
+        self.iter().filter(|&x| *x != u64::max_value()).count() == 0
+    }
+
+    /// Checks if the page has currently no allocations.
+    ///
+    /// This is called `all_free` rather than `is_emtpy` because
+    /// we already have an is_empty fn as part of the slice.
+    #[inline(always)]
+    fn all_free(&self) -> bool {
+        self.iter().filter(|&x| *x > 0x0).count() == 0
+    }
+}
+
 /// Holds allocated data.
 ///
 /// Objects life within data and meta tracks the objects status.
 /// Currently, `bitfield`, `next` and `prev` pointer should fit inside
 /// a single cache-line.
-#[repr(packed)]
+///
+/// # Notes
+/// Marked `repr(C)` because we rely on a well defined order of struct
+/// members (e.g., dealloc does a cast to find the bitfield).
+#[repr(C)]
 pub struct ObjectPage<'a> {
     /// Holds memory objects.
     #[allow(dead_code)]
@@ -631,12 +726,9 @@ pub struct ObjectPage<'a> {
 
 impl<'a> Default for ObjectPage<'a> {
     fn default() -> ObjectPage<'a> {
-        unsafe { mem::zeroed() }
+        unsafe { mem::MaybeUninit::zeroed().assume_init() }
     }
 }
-
-unsafe impl<'a> Send for ObjectPage<'a> {}
-unsafe impl<'a> Sync for ObjectPage<'a> {}
 
 impl<'a> fmt::Debug for ObjectPage<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -645,64 +737,10 @@ impl<'a> fmt::Debug for ObjectPage<'a> {
 }
 
 impl<'a> ObjectPage<'a> {
-    /// Tries to find a free block of memory that satisfies `alignment` requirement.
-    ///
-    /// # Notes
-    /// * We pass size here to be able to calculate the resulting address within `data`.
+    /// Tries to find a free block within `data` that satisfies `alignment` requirement.
     fn first_fit(&self, layout: Layout) -> Option<(usize, usize)> {
-        unsafe {
-            for (base_idx, b) in self.bitfield.iter().enumerate() {
-                let bitval = *b;
-                if bitval == u64::max_value() {
-                    continue;
-                } else {
-                    let negated = !bitval;
-                    let first_free = negated.trailing_zeros() as usize;
-                    let idx: usize = base_idx * 64 + first_free;
-                    let offset = idx * layout.size();
-
-                    let offset_inside_data_area =
-                        offset <= (BASE_PAGE_SIZE - CACHE_LINE_SIZE - layout.size());
-                    if !offset_inside_data_area {
-                        return None;
-                    }
-
-                    let addr: usize = ((self as *const ObjectPage) as usize) + offset;
-                    let alignment_ok = addr % layout.align() == 0;
-                    let block_is_free = bitval & (1 << first_free) == 0;
-                    if alignment_ok && block_is_free {
-                        return Some((idx, addr));
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Check if the current `idx` is allocated.
-    ///
-    /// # Notes
-    /// In case `idx` is 3 and allocation size of slab is
-    /// 8. The corresponding object would start at &data + 3 * 8.
-    fn is_allocated(&mut self, idx: usize) -> bool {
-        let base_idx = idx / 64;
-        let bit_idx = idx % 64;
-
-        (self.bitfield[base_idx] & (1 << bit_idx)) > 0
-    }
-
-    /// Sets the bit number `idx` in the bit-field.
-    fn set_bit(&mut self, idx: usize) {
-        let base_idx = idx / 64;
-        let bit_idx = idx % 64;
-        self.bitfield[base_idx] |= 1 << bit_idx;
-    }
-
-    /// Clears bit number `idx` in the bit-field.
-    fn clear_bit(&mut self, idx: usize) {
-        let base_idx = idx / 64;
-        let bit_idx = idx % 64;
-        self.bitfield[base_idx] &= !(1 << bit_idx);
+        let base_addr = (&*self as *const ObjectPage) as usize;
+        self.bitfield.first_fit(base_addr, layout)
     }
 
     /// Deallocates a memory object within this page.
@@ -711,9 +749,13 @@ impl<'a> ObjectPage<'a> {
         let page_offset = (ptr.as_ptr() as usize) & 0xfff;
         assert!(page_offset % layout.size() == 0);
         let idx = page_offset / layout.size();
-        assert!(self.is_allocated(idx), "{:p} not marked allocated?", ptr);
+        assert!(
+            self.bitfield.is_allocated(idx),
+            "{:p} not marked allocated?",
+            ptr
+        );
 
-        self.clear_bit(idx);
+        self.bitfield.clear_bit(idx);
         Ok(())
     }
 
@@ -723,7 +765,7 @@ impl<'a> ObjectPage<'a> {
     fn allocate(&mut self, layout: Layout) -> *mut u8 {
         match self.first_fit(layout) {
             Some((idx, addr)) => {
-                self.set_bit(idx);
+                self.bitfield.set_bit(idx);
                 addr as *mut u8
             }
             None => ptr::null_mut(),
@@ -732,20 +774,12 @@ impl<'a> ObjectPage<'a> {
 
     /// Checks if we can still allocate more objects within the page.
     fn is_full(&self) -> bool {
-        unsafe {
-            // TODO(performance?): rather than scanning everything abort
-            // after the first u64 bit value that has a free bit
-            self.bitfield
-                .iter()
-                .filter(|&x| *x != u64::max_value())
-                .count()
-                == 0
-        }
+        self.bitfield.is_full()
     }
 
     /// Checks if the page has currently no allocations.
     fn is_empty(&self) -> bool {
-        unsafe { self.bitfield.iter().filter(|&x| *x > 0x0).count() == 0 }
+        self.bitfield.all_free()
     }
 }
 

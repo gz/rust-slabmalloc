@@ -57,3 +57,16 @@ slabmalloc = { version = ..., default_features = false }
 
 ## Documentation
 * [API Documentation](https://docs.rs/slabmalloc)
+
+## Performance
+slabmalloc optimized for single-threaded, fixed-size object allocations. For
+anything else it will probably perform very poorly (for example if your
+workload does lots of reallocations).
+
+At least on my system, it outperforms jemalloc in (silly) benchmarks:
+```
+test tests::jemalloc_allocate_deallocate       ... bench:          76 ns/iter (+/- 5)
+test tests::jemalloc_allocate_deallocate_big   ... bench:         119 ns/iter (+/- 24)
+test tests::slabmalloc_allocate_deallocate     ... bench:          38 ns/iter (+/- 8)
+test tests::slabmalloc_allocate_deallocate_big ... bench:          38 ns/iter (+/- 11)
+```
