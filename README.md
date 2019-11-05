@@ -59,7 +59,7 @@ slabmalloc = { version = ..., default_features = false }
 * [API Documentation](https://docs.rs/slabmalloc)
 
 ## Performance
-slabmalloc optimized for single-threaded, fixed-size object allocations. For
+slabmalloc is optimized for single-threaded, fixed-size object allocations. For
 anything else it will probably perform very poorly (for example if your
 workload does lots of reallocations).
 
