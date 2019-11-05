@@ -60,8 +60,8 @@ slabmalloc = { version = ..., default_features = false }
 
 ## Performance
 slabmalloc is optimized for single-threaded, fixed-size object allocations. For
-anything else it will probably perform very poorly (for example if your
-workload does lots of reallocations).
+anything else it will probably perform poorly (for example if your
+workload does lots of reallocations). It is also not thread-safe.
 
 At least on my system, it outperforms jemalloc in (silly) benchmarks:
 ```

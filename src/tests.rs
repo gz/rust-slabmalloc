@@ -86,9 +86,12 @@ fn check_size() {
 #[test]
 fn test_mmap_allocator() {
     let mut mmap = MmapPageProvider::new();
+
     match mmap.allocate_page() {
         Some(sp) => {
+            sp.bitfield.initialize(8, BASE_PAGE_SIZE - 64);
             assert!(!sp.is_full(), "Got empty slab");
+            assert!(sp.is_empty(6 * 64), "Got empty slab");
             mmap.release_page(sp)
         }
         None => panic!("failed to allocate ObjectPage"),
@@ -427,4 +430,56 @@ pub fn iter_empty_list() {
     let mut l = ObjectPageList::new();
     l.insert_front(&mut new_head1);
     for _p in l.iter_mut() {}
+}
+
+#[test]
+pub fn check_is_full_8() {
+    let _r = env_logger::try_init();
+    let layout = Layout::from_size_align(8, 1).unwrap();
+
+    let mut page: ObjectPage = Default::default();
+    page.bitfield.initialize(8, BASE_PAGE_SIZE - 64);
+    let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 64) / 8, 6 * 64);
+
+    let mut allocs = 0;
+    loop {
+        if page.allocate(layout).is_null() {
+            break;
+        }
+        allocs += 1;
+
+        if allocs < (6 * 64) {
+            assert!(!page.is_full());
+            assert!(!page.is_empty(obj_per_page));
+        }
+    }
+
+    assert_eq!(allocs, 6 * 64, "Can use all bitmap space");
+    assert!(page.is_full());
+}
+
+// Test for bug that reports pages not as full when
+// the entire bitfield wasn't allocated.
+#[test]
+pub fn check_is_full_512() {
+    let _r = env_logger::try_init();
+    let mut page: ObjectPage = Default::default();
+    page.bitfield.initialize(512, BASE_PAGE_SIZE - 64);
+    let layout = Layout::from_size_align(512, 1).unwrap();
+    let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 64) / 512, 6 * 64);
+
+    let mut allocs = 0;
+    loop {
+        if page.allocate(layout).is_null() {
+            break;
+        }
+
+        allocs += 1;
+
+        if allocs < (BASE_PAGE_SIZE - 64) / 512 {
+            assert!(!page.is_full());
+            assert!(!page.is_empty(obj_per_page));
+        }
+    }
+    assert!(page.is_full());
 }

@@ -61,11 +61,6 @@ pub enum AllocationError {
 pub struct SafeZoneAllocator(Mutex<ZoneAllocator<'static>>);
 
 impl SafeZoneAllocator {
-    #[cfg(feature = "unstable")]
-    pub const fn new() -> SafeZoneAllocator {
-        SafeZoneAllocator(Mutex::new(ZoneAllocator::new()))
-    }
-    #[cfg(not(feature = "unstable"))]
     pub fn new() -> SafeZoneAllocator {
         SafeZoneAllocator(Mutex::new(ZoneAllocator::new()))
     }
@@ -105,24 +100,6 @@ pub struct ZoneAllocator<'a> {
 impl<'a> ZoneAllocator<'a> {
     pub const MAX_ALLOC_SIZE: usize = 4032;
 
-    #[cfg(feature = "unstable")]
-    pub const fn new() -> ZoneAllocator<'a> {
-        ZoneAllocator {
-            slabs: [
-                SCAllocator::new(8),
-                SCAllocator::new(16),
-                SCAllocator::new(32),
-                SCAllocator::new(64),
-                SCAllocator::new(128),
-                SCAllocator::new(256),
-                SCAllocator::new(512),
-                SCAllocator::new(1024),
-                SCAllocator::new(2048),
-                SCAllocator::new(4032),
-            ],
-        }
-    }
-    #[cfg(not(feature = "unstable"))]
     pub fn new() -> ZoneAllocator<'a> {
         ZoneAllocator {
             slabs: [
@@ -228,7 +205,6 @@ impl<'a> ZoneAllocator<'a> {
     ///  * `ptr` - Address of the memory location to free.
     ///  * `old_size` - Size of the block.
     ///  * `align` - Alignment of the block.
-    ///
     pub fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
         match self.try_acquire_slab(layout.size()) {
             Some(idx) => self.slabs[idx].deallocate(ptr, layout),
@@ -393,6 +369,8 @@ impl<'a> Iterator for ObjectPageIterMut<'a> {
 pub struct SCAllocator<'a> {
     /// Maximum possible allocation size for this `SCAllocator`.
     size: usize,
+    /// max objects per page
+    obj_per_page: usize,
     /// List of empty ObjectPages (nothing allocated in these).
     empty_slabs: ObjectPageList<'a>,
     /// List of partially used ObjectPage (some objects allocated but pages are not full).
@@ -403,23 +381,16 @@ pub struct SCAllocator<'a> {
 
 impl<'a> SCAllocator<'a> {
     /// Create a new SCAllocator.
-    #[cfg(feature = "unstable")]
-    pub const fn new(size: usize) -> SCAllocator<'a> {
+    pub fn new(size: usize) -> SCAllocator<'a> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
+        let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 64) / size, 6 * 64);
+
         SCAllocator {
             size,
+            obj_per_page,
             empty_slabs: ObjectPageList::new(),
             slabs: ObjectPageList::new(),
             full_slabs: ObjectPageList::new(),
-        }
-    }
-    /// Create a new SCAllocator.
-    #[cfg(not(feature = "unstable"))]
-    pub fn new(size: usize) -> SCAllocator<'a> {
-        // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
-        SCAllocator {
-            size,
-            slabs: ObjectPageList::new(),
         }
     }
 
@@ -433,7 +404,8 @@ impl<'a> SCAllocator<'a> {
     /// # Safety
     /// ObjectPage needs to be empty etc.
     pub unsafe fn refill(&mut self, page: &'a mut ObjectPage<'a>) {
-        trace!("added page to SCAllocator {:p}", page);
+        page.bitfield.initialize(self.size, BASE_PAGE_SIZE - 64);
+        trace!("adding page to SCAllocator {:p}", page);
         self.insert_empty(page);
     }
 
@@ -449,7 +421,6 @@ impl<'a> SCAllocator<'a> {
 
     /// Move a page from `slabs` to `empty_slabs`.
     fn move_to_empty(&mut self, page: &'a mut ObjectPage<'a>) {
-        debug_assert!(page.is_empty());
         let page_ptr = page as *const ObjectPage;
 
         debug_assert!(self.slabs.contains(page_ptr));
@@ -468,7 +439,6 @@ impl<'a> SCAllocator<'a> {
 
     /// Move a page from `full_slabs` to `slab`.
     fn move_partial_to_full(&mut self, page: &'a mut ObjectPage<'a>) {
-        debug_assert!(page.is_full());
         let page_ptr = page as *const ObjectPage;
 
         debug_assert!(self.slabs.contains(page_ptr));
@@ -483,7 +453,6 @@ impl<'a> SCAllocator<'a> {
 
     /// Move a page from `full_slabs` to `slab`.
     fn move_full_to_partial(&mut self, page: &'a mut ObjectPage<'a>) {
-        debug_assert!(!page.is_full());
         let page_ptr = page as *const ObjectPage;
 
         debug_assert!(!self.slabs.contains(page_ptr));
@@ -497,14 +466,18 @@ impl<'a> SCAllocator<'a> {
     }
 
     /// Tries to allocate a block of memory with respect to the `alignment`.
+    /// Searches within already allocated slab pages, if no suitable spot is found
+    /// will try to use a page from the empty page list.
     ///
-    /// Only searches within already allocated slab pages.
-    fn try_allocate_from_pagelist(&mut self, layout: Layout) -> *mut u8 {
+    /// # Arguments
+    ///  * `sc_layout`: This is not the original layout but adjusted for the
+    ///     SCAllocator size (>= original).
+    fn try_allocate_from_pagelist(&mut self, sc_layout: Layout) -> *mut u8 {
         // TODO: Do we really need to check multiple slab pages (due to alignment)
         // If not we can get away with a singly-linked list and have 8 more bytes
         // for the bitfield in an ObjectPage.
         for slab_page in self.slabs.iter_mut() {
-            let ptr = slab_page.allocate(layout);
+            let ptr = slab_page.allocate(sc_layout);
             if !ptr.is_null() {
                 if slab_page.is_full() {
                     trace!("move {:p} partial -> full", slab_page);
@@ -594,7 +567,7 @@ impl<'a> SCAllocator<'a> {
         let ret = slab_page.deallocate(ptr, new_layout);
         debug_assert!(ret.is_ok(), "Slab page deallocate won't fail at the moment");
 
-        if slab_page.is_empty() {
+        if slab_page.is_empty(self.obj_per_page) {
             // We need to move it from self.slabs -> self.empty_slabs
             trace!("move {:p} partial -> empty", slab_page);
             self.move_to_empty(slab_page);
@@ -610,16 +583,38 @@ impl<'a> SCAllocator<'a> {
 
 /// A trait defining bitfield operations we need for tracking allocated objects within a page.
 trait Bitfield {
+    fn initialize(&mut self, for_size: usize, capacity: usize);
     fn first_fit(&self, base_addr: usize, layout: Layout) -> Option<(usize, usize)>;
     fn is_allocated(&self, idx: usize) -> bool;
     fn set_bit(&mut self, idx: usize);
     fn clear_bit(&mut self, idx: usize);
     fn is_full(&self) -> bool;
-    fn all_free(&self) -> bool;
+    fn all_free(&self, relevant_bits: usize) -> bool;
 }
 
 /// Implementation of bit operations on [u64] arrays.
 impl Bitfield for [u64] {
+    /// Initialize the bitfield
+    ///
+    /// # Arguments
+    ///  * `for_size`: Object size we want to allocate
+    ///  * `capacity`: Maximum size of the buffer the bitmap maintains.
+    ///
+    /// Ensures that we only have free slots for what we can allocate
+    /// within the page (by marking everything else allocated).
+    fn initialize(&mut self, for_size: usize, capacity: usize) {
+        // Set everything to allocated
+        for bitmap in self.iter_mut() {
+            *bitmap = u64::max_value();
+        }
+
+        // Mark actual slots as free
+        let relevant_bits = core::cmp::min(capacity / for_size, self.len() * 64);
+        for idx in 0..relevant_bits {
+            self.clear_bit(idx);
+        }
+    }
+
     /// Tries to find a free block of memory that satisfies `alignment` requirement.
     ///
     /// # Notes
@@ -677,13 +672,16 @@ impl Bitfield for [u64] {
         self[base_idx] &= !(1 << bit_idx);
     }
 
-    /// Checks if we can still allocate more objects within the page.
+    /// Checks if we could allocate more objects of a given `alloc_size` within the
+    /// `capacity` of the memory allocator.
+    ///
+    /// # Note
+    /// The ObjectPage will make sure to mark the top-most bits as allocated
+    /// for large sizes (i.e., a size 512 SCAllocator will only really need 3 bits)
+    /// to track allocated objects). That's why this function can be simpler
+    /// than it would need to be in practice.
     #[inline(always)]
     fn is_full(&self) -> bool {
-        // TODO(performance?): rather than scanning everything abort
-        // after the first u64 bit value that has a free bit
-        // TODO(correctness): This may never report full if a size
-        // class does not use all bits
         self.iter().filter(|&x| *x != u64::max_value()).count() == 0
     }
 
@@ -692,8 +690,25 @@ impl Bitfield for [u64] {
     /// This is called `all_free` rather than `is_emtpy` because
     /// we already have an is_empty fn as part of the slice.
     #[inline(always)]
-    fn all_free(&self) -> bool {
-        self.iter().filter(|&x| *x > 0x0).count() == 0
+    fn all_free(&self, relevant_bits: usize) -> bool {
+        for (idx, bitmap) in self.iter().enumerate() {
+            let checking_bit_range = (idx * 64, (idx + 1) * 64);
+            if relevant_bits >= checking_bit_range.0 && relevant_bits < checking_bit_range.1 {
+                // Last relevant bitmap, here we only have to check that a subset of bitmap is marked free
+                // the rest will be marked full
+                let bits_that_should_be_free = relevant_bits - checking_bit_range.0;
+                let free_mask = (1 << bits_that_should_be_free) - 1;
+                return (free_mask & *bitmap) == 0;
+            }
+
+            if *bitmap == 0 {
+                continue;
+            } else {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -772,14 +787,14 @@ impl<'a> ObjectPage<'a> {
         }
     }
 
-    /// Checks if we can still allocate more objects within the page.
+    /// Checks if we can still allocate more objects of a given layout within the page.
     fn is_full(&self) -> bool {
         self.bitfield.is_full()
     }
 
     /// Checks if the page has currently no allocations.
-    fn is_empty(&self) -> bool {
-        self.bitfield.all_free()
+    fn is_empty(&self, relevant_bits: usize) -> bool {
+        self.bitfield.all_free(relevant_bits)
     }
 }
 
