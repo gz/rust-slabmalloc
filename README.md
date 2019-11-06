@@ -6,6 +6,17 @@ libcore and is designed to be used in kernel level code as the only interface a
 client needs to provide is the necessary mechanism to allocate and free 4KiB
 frames (or any other default page-size on non-x86 hardware).
 
+
+## Build
+
+By default this library should compile with nightly and stable versions of the
+Rust compiler.
+
+Add the following line to the Cargo.toml dependencies:
+```
+slabmalloc = <version>
+```
+
 ## Usage
 
 The slabmalloc API is designed to satisfy the rust liballoc low-level memory
@@ -25,7 +36,7 @@ let layout = Layout::from_size_align(object_size, alignment).unwrap();
 let mut mmap = MmapPageProvider::new();
 let page = mmap.allocate_page().expect("Can't allocate a page");
 
-let mut zone = ZoneAllocator::new();
+let mut zone: ZoneAllocator = Default::default();
 unsafe { zone.refill(layout, page)? };
 
 let allocated = zone.allocate(layout)?;
@@ -47,21 +58,11 @@ unsafe { sa.refill(page) };
 sa.allocate(layout)?;
 ```
 
-## Using on stable
-By default this packages requires a nightly version of the Rust
-compiler. To be able to use this package with a stable version of the
-Rust compiler, default features have to be disabled, e.g. with
-```
-slabmalloc = { version = ..., default_features = false }
-```
-
-## Documentation
-* [API Documentation](https://docs.rs/slabmalloc)
-
 ## Performance
+
 slabmalloc is optimized for single-threaded, fixed-size object allocations. For
-anything else it will probably perform poorly (for example if your
-workload does lots of reallocations). It is also not thread-safe.
+anything else it will probably perform poorly (for example if your workload
+does lots of reallocations, or if the allocator needs to scale to many cores).
 
 At least on my system, it outperforms jemalloc in (silly) benchmarks:
 ```
@@ -70,3 +71,6 @@ test tests::jemalloc_allocate_deallocate_big   ... bench:         119 ns/iter (+
 test tests::slabmalloc_allocate_deallocate     ... bench:          38 ns/iter (+/- 8)
 test tests::slabmalloc_allocate_deallocate_big ... bench:          38 ns/iter (+/- 11)
 ```
+
+## Documentation
+* [API Documentation](https://docs.rs/slabmalloc)

@@ -9,7 +9,6 @@
 //!    It holds its data in a ObjectPageList.
 //!  * A `ObjectPage` contains allocated objects and associated meta-data.
 #![allow(unused_features)]
-#![cfg_attr(feature = "unstable", feature(const_fn))]
 #![cfg_attr(
     test,
     feature(prelude_import, test, raw, libc, c_void_variant, core_intrinsics)
@@ -60,15 +59,14 @@ pub enum AllocationError {
 
 pub struct SafeZoneAllocator(Mutex<ZoneAllocator<'static>>);
 
-impl SafeZoneAllocator {
-    pub fn new() -> SafeZoneAllocator {
-        SafeZoneAllocator(Mutex::new(ZoneAllocator::new()))
+impl Default for SafeZoneAllocator {
+    fn default() -> SafeZoneAllocator {
+        SafeZoneAllocator(Mutex::new(Default::default()))
     }
 }
 
 unsafe impl GlobalAlloc for SafeZoneAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        assert!(layout.align().is_power_of_two());
         match self.0.lock().allocate(layout) {
             Ok(nptr) => nptr.as_ptr(),
             Err(AllocationError::OutOfMemory(_l)) => panic!("No memory in slabs, needs refilling"),
@@ -97,10 +95,8 @@ pub struct ZoneAllocator<'a> {
     slabs: [SCAllocator<'a>; MAX_SIZE_CLASSES],
 }
 
-impl<'a> ZoneAllocator<'a> {
-    pub const MAX_ALLOC_SIZE: usize = 4032;
-
-    pub fn new() -> ZoneAllocator<'a> {
+impl<'a> Default for ZoneAllocator<'a> {
+    fn default() -> ZoneAllocator<'a> {
         ZoneAllocator {
             slabs: [
                 SCAllocator::new(8),
@@ -116,6 +112,10 @@ impl<'a> ZoneAllocator<'a> {
             ],
         }
     }
+}
+
+impl<'a> ZoneAllocator<'a> {
+    pub const MAX_ALLOC_SIZE: usize = 4032;
 
     /// Return maximum size an object of size `current_size` can use.
     ///
@@ -222,14 +222,6 @@ struct ObjectPageList<'a> {
 }
 
 impl<'a> ObjectPageList<'a> {
-    #[cfg(feature = "unstable")]
-    const fn new() -> ObjectPageList<'a> {
-        ObjectPageList {
-            head: None,
-            elements: 0,
-        }
-    }
-    #[cfg(not(feature = "unstable"))]
     fn new() -> ObjectPageList<'a> {
         ObjectPageList {
             head: None,

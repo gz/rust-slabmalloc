@@ -254,7 +254,7 @@ fn test_readme() -> Result<(), AllocationError> {
     let mut mmap = MmapPageProvider::new();
     let page = mmap.allocate_page().expect("Can't allocate a page");
 
-    let mut zone = ZoneAllocator::new();
+    let mut zone: ZoneAllocator = Default::default();
     unsafe { zone.refill(layout, page)? };
 
     let allocated = zone.allocate(layout)?;
