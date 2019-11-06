@@ -76,11 +76,11 @@ fn check_size() {
         "ObjectPage should be exactly the size of a single page."
     );
 
-    /*assert_eq!(
+    assert_eq!(
         LARGE_PAGE_SIZE as usize,
         size_of::<LargeObjectPage>(),
         "LargeObjectPage should be exactly the size of a large-page."
-    );*/
+    );
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn test_mmap_allocator() {
 
     match mmap.allocate_page() {
         Some(sp) => {
-            sp.bitfield.initialize(8, BASE_PAGE_SIZE - 64);
+            sp.bitfield.initialize(8, BASE_PAGE_SIZE - 80);
             assert!(!sp.is_full(), "Got empty slab");
             assert!(sp.is_empty(6 * 64), "Got empty slab");
             mmap.release_page(sp)
@@ -387,7 +387,7 @@ fn list_pop() {
     let mut op4: ObjectPage = Default::default();
     let op4_ptr = &op4 as *const ObjectPage<'_>;
 
-    let mut list: ObjectPageList = ObjectPageList::new();
+    let mut list: PageList = PageList::new();
     list.insert_front(&mut op1);
     list.insert_front(&mut op2);
     list.insert_front(&mut op3);
@@ -427,7 +427,7 @@ fn list_pop() {
 #[test]
 pub fn iter_empty_list() {
     let mut new_head1: ObjectPage = Default::default();
-    let mut l = ObjectPageList::new();
+    let mut l = PageList::new();
     l.insert_front(&mut new_head1);
     for _p in l.iter_mut() {}
 }
@@ -438,8 +438,8 @@ pub fn check_is_full_8() {
     let layout = Layout::from_size_align(8, 1).unwrap();
 
     let mut page: ObjectPage = Default::default();
-    page.bitfield.initialize(8, BASE_PAGE_SIZE - 64);
-    let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 64) / 8, 6 * 64);
+    page.bitfield.initialize(8, BASE_PAGE_SIZE - 80);
+    let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 80) / 8, 8 * 64);
 
     let mut allocs = 0;
     loop {
@@ -448,13 +448,17 @@ pub fn check_is_full_8() {
         }
         allocs += 1;
 
-        if allocs < (6 * 64) {
-            assert!(!page.is_full());
+        if allocs < obj_per_page {
+            assert!(
+                !page.is_full(),
+                "Page mistakenly considered full after {} allocs",
+                allocs
+            );
             assert!(!page.is_empty(obj_per_page));
         }
     }
 
-    assert_eq!(allocs, 6 * 64, "Can use all bitmap space");
+    assert_eq!(allocs, obj_per_page, "Can use all bitmap space");
     assert!(page.is_full());
 }
 
@@ -464,9 +468,9 @@ pub fn check_is_full_8() {
 pub fn check_is_full_512() {
     let _r = env_logger::try_init();
     let mut page: ObjectPage = Default::default();
-    page.bitfield.initialize(512, BASE_PAGE_SIZE - 64);
+    page.bitfield.initialize(512, BASE_PAGE_SIZE - 80);
     let layout = Layout::from_size_align(512, 1).unwrap();
-    let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 64) / 512, 6 * 64);
+    let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 80) / 512, 6 * 64);
 
     let mut allocs = 0;
     loop {
@@ -476,7 +480,7 @@ pub fn check_is_full_512() {
 
         allocs += 1;
 
-        if allocs < (BASE_PAGE_SIZE - 64) / 512 {
+        if allocs < (BASE_PAGE_SIZE - 80) / 512 {
             assert!(!page.is_full());
             assert!(!page.is_empty(obj_per_page));
         }
