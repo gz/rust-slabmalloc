@@ -7,7 +7,9 @@
 //!    satisfy requests for different allocation sizes.
 //!  * A `SCAllocator` allocates objects of exactly one size.
 //!    It holds its data in a PageList.
-//!  * A `ObjectPage` contains allocated objects and associated meta-data.
+//!  * A trailt `AllocablePage` that defines the method a page from which we allocate needs.
+//!  * A `ObjectPage` that is 4 KiB and can contain allocated objects and associated meta-data.
+//!  * A `LargeObjectPage` that is 2 MiB and can contain allocated objects and associated meta-data.
 #![allow(unused_features)]
 #![cfg_attr(
     test,
@@ -47,7 +49,7 @@ const LARGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
 #[cfg(target_arch = "x86_64")]
 type VAddr = usize;
 
-const MAX_SIZE_CLASSES: usize = 15;
+const MAX_SIZE_CLASSES: usize = 10;
 
 #[derive(Debug)]
 pub enum AllocationError {
@@ -92,33 +94,42 @@ unsafe impl GlobalAlloc for SafeZoneAllocator {
 /// allocation requests for many different (MAX_SIZE_CLASSES) object sizes
 /// (by selecting the right slab allocator).
 pub struct ZoneAllocator<'a> {
-    slabs: [SCAllocator<'a>; MAX_SIZE_CLASSES],
+    small_slabs: [SCAllocator<'a, ObjectPage<'a>>; MAX_SIZE_CLASSES],
+    big_slabs: [SCAllocator<'a, LargeObjectPage<'a>>; 5],
 }
 
 impl<'a> Default for ZoneAllocator<'a> {
     fn default() -> ZoneAllocator<'a> {
         ZoneAllocator {
-            slabs: [
+            small_slabs: [
                 // Should probably pick better classes rather than powers-of-two
                 // (see SuperMalloc etc.)
-                SCAllocator::new(1 << 3),
-                SCAllocator::new(1 << 4),
-                SCAllocator::new(1 << 5),
-                SCAllocator::new(1 << 6),
-                SCAllocator::new(1 << 7),
-                SCAllocator::new(1 << 8),
-                SCAllocator::new(1 << 9),
-                SCAllocator::new(1 << 10), // XXX get rid of it?
-                SCAllocator::new(1 << 11), // XXX get rid of it?
-                SCAllocator::new(4016),    // XXX get rid of it?
-                SCAllocator::new(1 << 13),
-                SCAllocator::new(1 << 14),
-                SCAllocator::new(1 << 15),
-                SCAllocator::new(1 << 16),
-                SCAllocator::new(1 << 17),
+                SCAllocator::new(1 << 3),  // 8
+                SCAllocator::new(1 << 4),  // 16
+                SCAllocator::new(1 << 5),  // 32
+                SCAllocator::new(1 << 6),  // 64
+                SCAllocator::new(1 << 7),  // 128
+                SCAllocator::new(1 << 8),  // 256
+                SCAllocator::new(1 << 9),  // 512
+                SCAllocator::new(1 << 10), // 1024 (XXX get rid of the class?)
+                SCAllocator::new(1 << 11), // 2048 (XXX get rid of the class?)
+                SCAllocator::new(4016), // 4016 (can't do 4096 because of metadata in ObjectPage)
+            ],
+            big_slabs: [
+                SCAllocator::new(1 << 13), // 8192
+                SCAllocator::new(1 << 14), // 16384
+                SCAllocator::new(1 << 15), // 32767
+                SCAllocator::new(1 << 16), // 65536
+                SCAllocator::new(1 << 17), // 131072
             ],
         }
     }
+}
+
+enum Slab {
+    Base(usize),
+    Large(usize),
+    Unsupported,
 }
 
 impl<'a> ZoneAllocator<'a> {
@@ -140,42 +151,38 @@ impl<'a> ZoneAllocator<'a> {
             513..=1024 => Some(1024),
             1025..=2048 => Some(2048),
             2049..=4016 => Some(4016),
-            _ => unimplemented!("add other classes"),
+            4017..=8192 => Some(8192),
+            8193..=16384 => Some(16384),
+            16385..=32767 => Some(32767),
+            32768..=65536 => Some(65536),
+            65537..=131_072 => Some(131_072),
+            _ => None,
         }
     }
 
     /// Figure out index into zone array to get the correct slab allocator for that size.
-    fn get_slab_idx(requested_size: usize) -> Option<usize> {
+    fn get_slab(requested_size: usize) -> Slab {
         match requested_size {
-            0..=8 => Some(0),
-            9..=16 => Some(1),
-            17..=32 => Some(2),
-            33..=64 => Some(3),
-            65..=128 => Some(4),
-            129..=256 => Some(5),
-            257..=512 => Some(6),
-            513..=1024 => Some(7),
-            1025..=2048 => Some(8),
-            2049..=4016 => Some(9),
-            _ => unimplemented!("add other classes"),
+            0..=8 => Slab::Base(0),
+            9..=16 => Slab::Base(1),
+            17..=32 => Slab::Base(2),
+            33..=64 => Slab::Base(3),
+            65..=128 => Slab::Base(4),
+            129..=256 => Slab::Base(5),
+            257..=512 => Slab::Base(6),
+            513..=1024 => Slab::Base(7),
+            1025..=2048 => Slab::Base(8),
+            2049..=4016 => Slab::Base(9),
+            4017..=8192 => Slab::Large(0),
+            8193..=16384 => Slab::Large(1),
+            16385..=32767 => Slab::Large(2),
+            32768..=65536 => Slab::Large(3),
+            65537..=131_072 => Slab::Large(4),
+            _ => Slab::Unsupported,
         }
     }
 
-    /// Tries to locate a slab allocator.
-    ///
-    /// Returns either a index into the slab array or None in case
-    /// the requested allocation size can not be satisfied by
-    /// any of the available slabs.
-    fn try_acquire_slab(&mut self, size: usize) -> Option<usize> {
-        ZoneAllocator::get_slab_idx(size).map(|idx| {
-            if self.slabs[idx].size == 0 {
-                self.slabs[idx].size = size;
-            }
-            idx
-        })
-    }
-
-    /// Refills the SCAllocator for a given Layouyt with an ObjectPage.
+    /// Refills the SCAllocator for a given Layout with an ObjectPage.
     ///
     /// # Safety
     /// ObjectPage needs to be emtpy etc.
@@ -184,12 +191,32 @@ impl<'a> ZoneAllocator<'a> {
         layout: Layout,
         new_page: &'a mut ObjectPage<'a>,
     ) -> Result<(), AllocationError> {
-        match ZoneAllocator::get_slab_idx(layout.size()) {
-            Some(idx) => {
-                self.slabs[idx].insert_empty(new_page);
+        match ZoneAllocator::get_slab(layout.size()) {
+            Slab::Base(idx) => {
+                self.small_slabs[idx].insert_empty(new_page);
                 Ok(())
             }
-            None => Err(AllocationError::InvalidLayout),
+            Slab::Large(_idx) => Err(AllocationError::InvalidLayout),
+            Slab::Unsupported => Err(AllocationError::InvalidLayout),
+        }
+    }
+
+    /// Refills the SCAllocator for a given Layout with an ObjectPage.
+    ///
+    /// # Safety
+    /// ObjectPage needs to be emtpy etc.
+    pub unsafe fn refill_large(
+        &mut self,
+        layout: Layout,
+        new_page: &'a mut LargeObjectPage<'a>,
+    ) -> Result<(), AllocationError> {
+        match ZoneAllocator::get_slab(layout.size()) {
+            Slab::Base(_idx) => Err(AllocationError::InvalidLayout),
+            Slab::Large(idx) => {
+                self.big_slabs[idx].insert_empty(new_page);
+                Ok(())
+            }
+            Slab::Unsupported => Err(AllocationError::InvalidLayout),
         }
     }
 
@@ -200,9 +227,10 @@ impl<'a> ZoneAllocator<'a> {
     /// In case we are out of memory we try to refill the slab using our local pager
     /// and re-try the allocation request once more before we give up.
     pub fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocationError> {
-        match self.try_acquire_slab(layout.size()) {
-            Some(idx) => self.slabs[idx].allocate(layout),
-            None => Err(AllocationError::InvalidLayout),
+        match ZoneAllocator::get_slab(layout.size()) {
+            Slab::Base(idx) => self.small_slabs[idx].allocate(layout),
+            Slab::Large(idx) => self.big_slabs[idx].allocate(layout),
+            Slab::Unsupported => Err(AllocationError::InvalidLayout),
         }
     }
 
@@ -213,9 +241,10 @@ impl<'a> ZoneAllocator<'a> {
     ///  * `old_size` - Size of the block.
     ///  * `align` - Alignment of the block.
     pub fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
-        match self.try_acquire_slab(layout.size()) {
-            Some(idx) => self.slabs[idx].deallocate(ptr, layout),
-            None => Err(AllocationError::InvalidLayout),
+        match ZoneAllocator::get_slab(layout.size()) {
+            Slab::Base(idx) => self.small_slabs[idx].deallocate(ptr, layout),
+            Slab::Large(idx) => self.big_slabs[idx].deallocate(ptr, layout),
+            Slab::Unsupported => Err(AllocationError::InvalidLayout),
         }
     }
 }
@@ -237,22 +266,22 @@ impl<'a> ZoneAllocator<'a> {
 ///
 /// Similarly, on dealloaction we might move a page from `full_slabs` to `slabs`
 /// or from `slabs` to `empty_slabs` after we deallocated an object.
-pub struct SCAllocator<'a> {
+pub struct SCAllocator<'a, P: AllocablePage> {
     /// Maximum possible allocation size for this `SCAllocator`.
     size: usize,
     /// max objects per page
     obj_per_page: usize,
     /// List of empty ObjectPages (nothing allocated in these).
-    empty_slabs: PageList<'a>,
+    empty_slabs: PageList<'a, P>,
     /// List of partially used ObjectPage (some objects allocated but pages are not full).
-    slabs: PageList<'a>,
+    slabs: PageList<'a, P>,
     /// List of full ObjectPages (everything allocated in these don't need to search them).
-    full_slabs: PageList<'a>,
+    full_slabs: PageList<'a, P>,
 }
 
-impl<'a> SCAllocator<'a> {
+impl<'a, P: AllocablePage> SCAllocator<'a, P> {
     /// Create a new SCAllocator.
-    pub fn new(size: usize) -> SCAllocator<'a> {
+    pub fn new(size: usize) -> SCAllocator<'a, P> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
         let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 80) / size, 8 * 64);
 
@@ -271,18 +300,23 @@ impl<'a> SCAllocator<'a> {
     }
 
     /// Add a new ObjectPage.
-    fn insert_partial_slab(&mut self, new_head: &'a mut ObjectPage<'a>) {
+    fn insert_partial_slab(&mut self, new_head: &'a mut P) {
         self.slabs.insert_front(new_head);
     }
 
     /// Add page to empty list.
-    fn insert_empty(&mut self, new_head: &'a mut ObjectPage<'a>) {
+    fn insert_empty(&mut self, new_head: &'a mut P) {
+        assert_eq!(
+            new_head as *const P as usize % P::size(),
+            0,
+            "Inserted page is not aligned to page-size."
+        );
         self.empty_slabs.insert_front(new_head);
     }
 
     /// Move a page from `slabs` to `empty_slabs`.
-    fn move_to_empty(&mut self, page: &'a mut ObjectPage<'a>) {
-        let page_ptr = page as *const ObjectPage;
+    fn move_to_empty(&mut self, page: &'a mut P) {
+        let page_ptr = page as *const P;
 
         debug_assert!(self.slabs.contains(page_ptr));
         debug_assert!(
@@ -299,8 +333,8 @@ impl<'a> SCAllocator<'a> {
     }
 
     /// Move a page from `full_slabs` to `slab`.
-    fn move_partial_to_full(&mut self, page: &'a mut ObjectPage<'a>) {
-        let page_ptr = page as *const ObjectPage;
+    fn move_partial_to_full(&mut self, page: &'a mut P) {
+        let page_ptr = page as *const P;
 
         debug_assert!(self.slabs.contains(page_ptr));
         debug_assert!(!self.full_slabs.contains(page_ptr));
@@ -313,8 +347,8 @@ impl<'a> SCAllocator<'a> {
     }
 
     /// Move a page from `full_slabs` to `slab`.
-    fn move_full_to_partial(&mut self, page: &'a mut ObjectPage<'a>) {
-        let page_ptr = page as *const ObjectPage;
+    fn move_full_to_partial(&mut self, page: &'a mut P) {
+        let page_ptr = page as *const P;
 
         debug_assert!(!self.slabs.contains(page_ptr));
         debug_assert!(self.full_slabs.contains(page_ptr));
@@ -357,8 +391,10 @@ impl<'a> SCAllocator<'a> {
     ///
     /// # Safety
     /// ObjectPage needs to be empty etc.
-    pub unsafe fn refill(&mut self, page: &'a mut ObjectPage<'a>) {
-        page.bitfield.initialize(self.size, BASE_PAGE_SIZE - 80);
+    pub unsafe fn refill(&mut self, page: &'a mut P) {
+        page.bitfield_mut().initialize(self.size, P::size() - 80);
+        *page.prev() = Rawlink::none();
+        *page.next() = Rawlink::none();
         trace!("adding page to SCAllocator {:p}", page);
         self.insert_empty(page);
     }
@@ -374,7 +410,7 @@ impl<'a> SCAllocator<'a> {
             layout
         );
         assert!(layout.size() <= self.size);
-        assert!(self.size <= (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
+        assert!(self.size <= (P::size() - CACHE_LINE_SIZE));
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
         assert!(new_layout.size() >= layout.size());
 
@@ -419,19 +455,20 @@ impl<'a> SCAllocator<'a> {
     /// Deallocates a previously allocated block.
     fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
         assert!(layout.size() <= self.size);
-        assert!(self.size <= (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE));
+        assert!(self.size <= (P::size() - CACHE_LINE_SIZE));
         trace!(
-            "SCAllocator({}) is trying to deallocate ptr = {:p} layout={:?}",
+            "SCAllocator({}) is trying to deallocate ptr = {:p} layout={:?} P.size= {}",
             self.size,
             ptr,
-            layout
+            layout,
+            P::size()
         );
 
-        let page = (ptr.as_ptr() as usize) & !(BASE_PAGE_SIZE - 1) as usize;
+        let page = (ptr.as_ptr() as usize) & !(P::size() - 1) as usize;
 
         // Figure out which page we are on and construct a reference to it
         // TODO: The linked list will have another &mut reference
-        let slab_page = unsafe { mem::transmute::<VAddr, &'a mut ObjectPage>(page) };
+        let slab_page = unsafe { mem::transmute::<VAddr, &'a mut P>(page) };
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
 
         let slab_page_was_full = slab_page.is_full();
@@ -502,8 +539,12 @@ impl Bitfield for [u64] {
                 let idx: usize = base_idx * 64 + first_free;
                 let offset = idx * layout.size();
 
-                let offset_inside_data_area =
-                    offset <= (BASE_PAGE_SIZE - CACHE_LINE_SIZE - layout.size());
+                // TODO(bad): psize needs to be passed as arg
+                let offset_inside_data_area = if layout.size() < BASE_PAGE_SIZE {
+                    offset <= (BASE_PAGE_SIZE - 80 - layout.size())
+                } else {
+                    offset <= (LARGE_PAGE_SIZE - 80 - layout.size())
+                };
                 if !offset_inside_data_area {
                     return None;
                 }
@@ -583,10 +624,16 @@ impl Bitfield for [u64] {
     }
 }
 
-trait AllocatablePage {
+pub trait AllocablePage {
     fn size() -> usize;
     fn bitfield(&self) -> &[u64; 8];
     fn bitfield_mut(&mut self) -> &mut [u64; 8];
+    fn prev(&mut self) -> &mut Rawlink<Self>
+    where
+        Self: core::marker::Sized;
+    fn next(&mut self) -> &mut Rawlink<Self>
+    where
+        Self: core::marker::Sized;
 
     /// Tries to find a free block within `data` that satisfies `alignment` requirement.
     fn first_fit(&self, layout: Layout) -> Option<(usize, usize)> {
@@ -620,7 +667,7 @@ trait AllocatablePage {
     /// Deallocates a memory object within this page.
     fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
         trace!(
-            "AllocatablePage deallocating ptr = {:p} with {:?}",
+            "AllocablePage deallocating ptr = {:p} with {:?}",
             ptr,
             layout
         );
@@ -659,7 +706,7 @@ pub struct LargeObjectPage<'a> {
     bitfield: [u64; 8],
 }
 
-impl<'a> AllocatablePage for LargeObjectPage<'a> {
+impl<'a> AllocablePage for LargeObjectPage<'a> {
     fn size() -> usize {
         LARGE_PAGE_SIZE
     }
@@ -670,6 +717,14 @@ impl<'a> AllocatablePage for LargeObjectPage<'a> {
 
     fn bitfield_mut(&mut self) -> &mut [u64; 8] {
         &mut self.bitfield
+    }
+
+    fn prev(&mut self) -> &mut Rawlink<Self> {
+        &mut self.prev
+    }
+
+    fn next(&mut self) -> &mut Rawlink<Self> {
+        &mut self.next
     }
 }
 
@@ -704,7 +759,7 @@ pub struct ObjectPage<'a> {
     bitfield: [u64; 8],
 }
 
-impl<'a> AllocatablePage for ObjectPage<'a> {
+impl<'a> AllocablePage for ObjectPage<'a> {
     fn size() -> usize {
         BASE_PAGE_SIZE
     }
@@ -713,6 +768,14 @@ impl<'a> AllocatablePage for ObjectPage<'a> {
     }
     fn bitfield_mut(&mut self) -> &mut [u64; 8] {
         &mut self.bitfield
+    }
+
+    fn prev(&mut self) -> &mut Rawlink<Self> {
+        &mut self.prev
+    }
+
+    fn next(&mut self) -> &mut Rawlink<Self> {
+        &mut self.next
     }
 }
 
@@ -729,41 +792,45 @@ impl<'a> fmt::Debug for ObjectPage<'a> {
 }
 
 /// A list of pages.
-struct PageList<'a> {
+struct PageList<'a, T: AllocablePage> {
     /// Points to the head of the list.
-    head: Option<&'a mut ObjectPage<'a>>,
+    head: Option<&'a mut T>,
     /// Number of elements in the list.
     pub elements: usize,
 }
 
-impl<'a> PageList<'a> {
-    fn new() -> PageList<'a> {
+impl<'a, T: AllocablePage> PageList<'a, T> {
+    fn new() -> PageList<'a, T> {
         PageList {
             head: None,
             elements: 0,
         }
     }
 
-    fn iter_mut<'b>(&'b mut self) -> ObjectPageIterMut<'a> {
+    fn iter_mut<'b: 'a>(&mut self) -> ObjectPageIterMut<'b, T> {
         let m = match self.head {
             None => Rawlink::none(),
             Some(ref mut m) => Rawlink::some(*m),
         };
-        ObjectPageIterMut { head: m }
+
+        ObjectPageIterMut {
+            head: m,
+            phantom: core::marker::PhantomData,
+        }
     }
 
     /// Inserts `new_head` at the front of the list.
-    fn insert_front<'b>(&'b mut self, mut new_head: &'a mut ObjectPage<'a>) {
+    fn insert_front<'b>(&'b mut self, mut new_head: &'a mut T) {
         match self.head {
             None => {
-                new_head.prev = Rawlink::none();
+                *new_head.prev() = Rawlink::none();
                 self.head = Some(new_head);
             }
             Some(ref mut head) => {
-                new_head.prev = Rawlink::none();
-                head.prev = Rawlink::some(new_head);
+                *new_head.prev() = Rawlink::none();
+                *head.prev() = Rawlink::some(new_head);
                 mem::swap(head, &mut new_head);
-                head.next = Rawlink::some(new_head);
+                *head.next() = Rawlink::some(new_head);
             }
         }
 
@@ -771,24 +838,24 @@ impl<'a> PageList<'a> {
     }
 
     /// Removes `slab_page` from the list.
-    fn remove_from_list<'b, 'c>(&'b mut self, slab_page: &'c mut ObjectPage<'a>) {
+    fn remove_from_list(&mut self, slab_page: &mut T) {
         unsafe {
-            match slab_page.prev.resolve_mut() {
+            match slab_page.prev().resolve_mut() {
                 None => {
-                    self.head = slab_page.next.resolve_mut();
+                    self.head = slab_page.next().resolve_mut();
                 }
                 Some(prev) => {
-                    prev.next = match slab_page.next.resolve_mut() {
+                    *prev.next() = match slab_page.next().resolve_mut() {
                         None => Rawlink::none(),
                         Some(next) => Rawlink::some(next),
                     };
                 }
             }
 
-            match slab_page.next.resolve_mut() {
+            match slab_page.next().resolve_mut() {
                 None => (),
                 Some(next) => {
-                    next.prev = match slab_page.prev.resolve_mut() {
+                    *next.prev() = match slab_page.prev().resolve_mut() {
                         None => Rawlink::none(),
                         Some(prev) => Rawlink::some(prev),
                     };
@@ -796,26 +863,27 @@ impl<'a> PageList<'a> {
             }
         }
 
-        slab_page.prev = Rawlink::none();
-        slab_page.next = Rawlink::none();
+        *slab_page.prev() = Rawlink::none();
+        *slab_page.next() = Rawlink::none();
         self.elements -= 1;
     }
 
     /// Removes `slab_page` from the list.
-    fn pop<'b, 'c>(&'b mut self) -> Option<&'c mut ObjectPage<'a>> {
+    fn pop<'b>(&'b mut self) -> Option<&'a mut T> {
         match self.head {
             None => None,
             Some(ref mut head) => {
-                let mut new_head = unsafe { head.next.resolve_mut() };
+                let head_next = head.next();
+                let mut new_head = unsafe { head_next.resolve_mut() };
                 mem::swap(&mut self.head, &mut new_head);
                 let _ = self.head.as_mut().map(|n| {
-                    n.prev = Rawlink::none();
+                    *n.prev() = Rawlink::none();
                 });
 
                 self.elements -= 1;
                 new_head.map(|node| {
-                    node.prev = Rawlink::none();
-                    node.next = Rawlink::none();
+                    *node.prev() = Rawlink::none();
+                    *node.next() = Rawlink::none();
                     node
                 })
             }
@@ -823,9 +891,9 @@ impl<'a> PageList<'a> {
     }
 
     /// Does the list contain `s`?
-    fn contains(&mut self, s: *const ObjectPage<'a>) -> bool {
+    fn contains(&mut self, s: *const T) -> bool {
         for slab_page in self.iter_mut() {
-            if slab_page as *const ObjectPage == s as *const ObjectPage {
+            if slab_page as *const T == s as *const T {
                 return true;
             }
         }
@@ -835,18 +903,19 @@ impl<'a> PageList<'a> {
 }
 
 /// Iterate over all the pages inside a slab allocator
-struct ObjectPageIterMut<'a> {
-    head: Rawlink<ObjectPage<'a>>,
+struct ObjectPageIterMut<'a, P: AllocablePage> {
+    head: Rawlink<P>,
+    phantom: core::marker::PhantomData<&'a P>,
 }
 
-impl<'a> Iterator for ObjectPageIterMut<'a> {
-    type Item = &'a mut ObjectPage<'a>;
+impl<'a, P: AllocablePage + 'a> Iterator for ObjectPageIterMut<'a, P> {
+    type Item = &'a mut P;
 
     #[inline]
-    fn next(&mut self) -> Option<&'a mut ObjectPage<'a>> {
+    fn next(&mut self) -> Option<&'a mut P> {
         unsafe {
             self.head.resolve_mut().map(|next| {
-                self.head = match next.next.resolve_mut() {
+                self.head = match next.next().resolve_mut() {
                     None => Rawlink::none(),
                     Some(ref mut sp) => Rawlink::some(*sp),
                 };
@@ -857,7 +926,7 @@ impl<'a> Iterator for ObjectPageIterMut<'a> {
 }
 
 /// Rawlink is a type like Option<T> but for holding a raw pointer
-struct Rawlink<T> {
+pub struct Rawlink<T> {
     p: *mut T,
 }
 
