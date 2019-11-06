@@ -277,7 +277,7 @@ test_sc_allocation!(op_4096_size1024_alignment1, 1024, 1, 4096, ObjectPage);
 test_sc_allocation!(op_10_size2048_alignment1, 2048, 1, 10, ObjectPage);
 test_sc_allocation!(op_10000_size512_alignment1, 512, 1, 10000, ObjectPage);
 
-macro_rules! test_lop_allocation {
+macro_rules! lop_allocation {
     ($test:ident, $size:expr, $alignment:expr, $allocations:expr, $type:ty) => {
         #[test]
         fn $test() {
@@ -397,27 +397,13 @@ macro_rules! test_lop_allocation {
     };
 }
 
-//test_lop_allocation!(lop_512_size8_alignment1, 8, 1, 512, LargeObjectPage);
-//test_lop_allocation!(lop_4096_size8_alignment8, 8, 8, 4096, LargeObjectPage);
-//test_lop_allocation!(lop_500_size8_alignment64, 8, 64, 500, LargeObjectPage);
-//test_lop_allocation!(lop_4096_size12_alignment1, 12, 1, 4096, LargeObjectPage);
-//test_lop_allocation!(lop_4096_size13_alignment1, 13, 1, 4096, LargeObjectPage);
-//test_lop_allocation!(lop_2000_size14_alignment1, 14, 1, 2000, LargeObjectPage);
-//test_lop_allocation!(lop_4096_size15_alignment1, 15, 1, 4096, LargeObjectPage);
-//test_lop_allocation!(lop_8000_size16_alignment1, 16, 1, 8000, LargeObjectPage);
-//test_lop_allocation!(lop_1024_size24_alignment1, 24, 1, 1024, LargeObjectPage);
-//test_lop_allocation!(lop_3090_size32_alignment1, 32, 1, 3090, LargeObjectPage);
-//test_lop_allocation!(lop_4096_size64_alignment1, 64, 1, 4096, LargeObjectPage);
-//test_lop_allocation!(lop_1000_size512_alignment1, 512, 1, 1000, LargeObjectPage);
-//test_lop_allocation!(lop_4096_size1024_alignment1, 1024, 1, 4096, LargeObjectPage);
-//test_lop_allocation!(lop_10_size2048_alignment1, 2048, 1, 10, LargeObjectPage);
-test_lop_allocation!(
-    lop_10000_size4096_alignment1,
-    4096,
-    1,
-    10000,
-    LargeObjectPage
-);
+lop_allocation!(lop_4096_3, 8, 1, 1024, LargeObjectPage);
+lop_allocation!(lop_4096_12, 4096, 4096, 2048, LargeObjectPage);
+lop_allocation!(lop_4096_13, 1 << 13, 4096, 4096, LargeObjectPage);
+lop_allocation!(lop_4096_14, 1 << 14, 4096, 4096, LargeObjectPage);
+lop_allocation!(lop_4096_15, 1 << 15, 4096, 4096, LargeObjectPage);
+lop_allocation!(lop_4096_16, 1 << 16, 4096, 4096, LargeObjectPage);
+lop_allocation!(lop_4096_17, 1 << 17, 4096, 4096, LargeObjectPage);
 
 #[test]
 #[should_panic]

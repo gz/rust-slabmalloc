@@ -283,7 +283,7 @@ impl<'a, P: AllocablePage> SCAllocator<'a, P> {
     /// Create a new SCAllocator.
     pub fn new(size: usize) -> SCAllocator<'a, P> {
         // const_assert!(size < (BASE_PAGE_SIZE as usize - CACHE_LINE_SIZE);
-        let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 80) / size, 8 * 64);
+        let obj_per_page = core::cmp::min((P::size() - 80) / size, 8 * 64);
 
         SCAllocator {
             size,
