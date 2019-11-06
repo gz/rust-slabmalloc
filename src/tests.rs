@@ -1,30 +1,75 @@
 use env_logger;
-use libc;
 use rand;
 use std::alloc;
 use std::alloc::Layout;
+use std::collections::HashSet;
 use std::mem::{size_of, transmute};
 use std::prelude::v1::*;
 
 use super::*;
 use test::Bencher;
 
-/// Page allocator based on mmap/munmap system calls for backing slab memory.
-struct MmapPageProvider {
-    currently_allocated: usize,
+/// A simple page allocator based on GlobalAlloc (for testing purposes).
+struct Pager {
+    base_pages: HashSet<*mut u8>, // probably should be hash-tables
+    large_pages: HashSet<*mut u8>,
 }
 
-impl MmapPageProvider {
-    pub fn new() -> MmapPageProvider {
-        MmapPageProvider {
-            currently_allocated: 0,
+unsafe impl Send for Pager {}
+unsafe impl Sync for Pager {}
+
+impl Pager {
+    pub fn new() -> Pager {
+        Pager {
+            base_pages: HashSet::with_capacity(1024),
+            large_pages: HashSet::with_capacity(128),
         }
     }
 }
 
-impl MmapPageProvider {
+impl Pager {
     pub fn currently_allocated(&self) -> usize {
-        self.currently_allocated
+        self.base_pages.len() + self.large_pages.len()
+    }
+
+    fn alloc_page(&mut self, page_size: usize) -> Option<*mut u8> {
+        let r =
+            unsafe { std::alloc::alloc(Layout::from_size_align(page_size, page_size).unwrap()) };
+
+        if !r.is_null() {
+            match page_size {
+                BASE_PAGE_SIZE => self.base_pages.insert(r),
+                LARGE_PAGE_SIZE => self.large_pages.insert(r),
+                _ => unreachable!("invalid page-size supplied"),
+            };
+            Some(r)
+        } else {
+            None
+        }
+    }
+
+    fn dealloc_page(&mut self, ptr: *mut u8, page_size: usize) {
+        let layout = match page_size {
+            BASE_PAGE_SIZE => {
+                assert!(
+                    self.base_pages.contains(&ptr),
+                    "Trying to deallocate invalid base-page"
+                );
+                self.base_pages.remove(&ptr);
+                Layout::from_size_align(BASE_PAGE_SIZE, BASE_PAGE_SIZE).unwrap()
+            }
+            LARGE_PAGE_SIZE => {
+                assert!(
+                    self.large_pages.contains(&ptr),
+                    "Trying to deallocate invalid large-page"
+                );
+                self.large_pages.remove(&ptr);
+                Layout::from_size_align(LARGE_PAGE_SIZE, LARGE_PAGE_SIZE).unwrap()
+            }
+            _ => unreachable!("invalid page-size supplied"),
+        };
+
+        unsafe { std::alloc::dealloc(ptr, layout) };
     }
 }
 
@@ -36,68 +81,35 @@ trait PageProvider<'a>: Send {
     fn release_large_page(&mut self, page: &'a mut LargeObjectPage<'a>);
 }
 
-impl<'a> PageProvider<'a> for MmapPageProvider {
+impl<'a> PageProvider<'a> for Pager {
     /// Allocates a new ObjectPage from the system.
     ///
     /// Uses `mmap` to map a page and casts it to a ObjectPage.
     fn allocate_page(&mut self) -> Option<&'a mut ObjectPage<'a>> {
-        let mut addr: libc::c_void = libc::c_void::__variant1;
-        let len: libc::size_t = BASE_PAGE_SIZE;
-        let prot = libc::PROT_READ | libc::PROT_WRITE;
-        let flags = libc::MAP_PRIVATE | libc::MAP_ANON;
-        let fd = -1;
-        let offset = 0;
-
-        let r = unsafe { libc::mmap(&mut addr, len as libc::size_t, prot, flags, fd, offset) };
-        if r == libc::MAP_FAILED {
-            return None;
-        } else {
-            let slab_page: &'a mut ObjectPage = unsafe { transmute(r as usize) };
-            self.currently_allocated += 1;
-            return Some(slab_page);
-        }
+        self.alloc_page(BASE_PAGE_SIZE)
+            .map(|r| unsafe { transmute(r as usize) })
     }
 
     /// Release a ObjectPage back to the system.slab_page
     ///
     /// Uses `munmap` to release the page back to the OS.
     fn release_page(&mut self, p: &'a mut ObjectPage<'a>) {
-        let addr: *mut libc::c_void = unsafe { transmute(p) };
-        let len: libc::size_t = BASE_PAGE_SIZE;
-        let r = unsafe { libc::munmap(addr, len) };
-        if r != 0 {
-            panic!("munmap failed!");
-        }
-        self.currently_allocated -= 1;
+        self.dealloc_page(p as *const ObjectPage as *mut u8, BASE_PAGE_SIZE);
     }
 
     /// Allocates a new ObjectPage from the system.
     ///
     /// Uses `mmap` to map a page and casts it to a ObjectPage.
     fn allocate_large_page(&mut self) -> Option<&'a mut LargeObjectPage<'a>> {
-        let r = unsafe {
-            std::alloc::alloc(Layout::from_size_align(LARGE_PAGE_SIZE, LARGE_PAGE_SIZE).unwrap())
-        };
-        if r.is_null() {
-            return None;
-        } else {
-            let slab_page: &'a mut LargeObjectPage = unsafe { transmute(r as usize) };
-            self.currently_allocated += 1;
-            return Some(slab_page);
-        }
+        self.alloc_page(LARGE_PAGE_SIZE)
+            .map(|r| unsafe { transmute(r as usize) })
     }
 
     /// Release a LargeObjectPage back to the system.slab_page
     ///
     /// Uses `munmap` to release the page back to the OS.
     fn release_large_page(&mut self, p: &'a mut LargeObjectPage<'a>) {
-        /*let addr: *mut libc::c_void = unsafe { transmute(p) };
-        let len: libc::size_t = LARGE_PAGE_SIZE;
-        let r = unsafe { libc::munmap(addr, len) };
-        if r != 0 {
-            panic!("munmap failed!");
-        }*/
-        self.currently_allocated -= 1;
+        self.dealloc_page(p as *const LargeObjectPage as *mut u8, LARGE_PAGE_SIZE);
     }
 }
 
@@ -118,7 +130,7 @@ fn check_size() {
 
 #[test]
 fn test_mmap_allocator() {
-    let mut mmap = MmapPageProvider::new();
+    let mut mmap = Pager::new();
 
     match mmap.allocate_page() {
         Some(sp) => {
@@ -146,7 +158,7 @@ macro_rules! test_sc_allocation {
         #[test]
         fn $test() {
             let _ = env_logger::try_init();
-            let mut mmap = MmapPageProvider::new();
+            let mut mmap = Pager::new();
             {
                 let mut sa: SCAllocator<$type> = SCAllocator::new($size);
                 let alignment = $alignment;
@@ -282,7 +294,7 @@ macro_rules! lop_allocation {
         #[test]
         fn $test() {
             let _ = env_logger::try_init();
-            let mut mmap = MmapPageProvider::new();
+            let mut mmap = Pager::new();
             {
                 let mut sa: SCAllocator<$type> = SCAllocator::new($size);
                 let alignment = $alignment;
@@ -417,10 +429,16 @@ fn test_readme() -> Result<(), AllocationError> {
     let alignment = 4;
     let layout = Layout::from_size_align(object_size, alignment).unwrap();
 
-    let mut mmap = MmapPageProvider::new();
-    let page = mmap.allocate_page().expect("Can't allocate a page");
+    // We need something that can provide backing memory
+    // (4 KiB and 2 MiB pages) to our ZoneAllocator
+    // (see tests.rs for a dummy implementation).
+    let mut pager = Pager::new();
+    let page = pager.allocate_page().expect("Can't allocate a page");
 
     let mut zone: ZoneAllocator = Default::default();
+    // Prematurely fill the ZoneAllocator with memory.
+    // Alternatively, the allocate call would return an
+    // error which we can capture to refill on-demand.
     unsafe { zone.refill(layout, page)? };
 
     let allocated = zone.allocate(layout)?;
@@ -435,10 +453,16 @@ fn test_readme2() -> Result<(), AllocationError> {
     let alignment = 8;
     let layout = Layout::from_size_align(object_size, alignment).unwrap();
 
-    let mut mmap = MmapPageProvider::new();
-    let page = mmap.allocate_page().expect("Can't allocate a page");
+    // We need something that can provide backing memory
+    // (4 KiB and 2 MiB pages) to our ZoneAllocator
+    // (see tests.rs for a dummy implementation).
+    let mut pager = Pager::new();
+    let page = pager.allocate_page().expect("Can't allocate a page");
 
     let mut sa: SCAllocator<ObjectPage> = SCAllocator::new(object_size);
+    // Prematurely fill the SCAllocator with memory.
+    // Alternatively, the allocate call would return an
+    // error which we can capture to refill on-demand.
     unsafe { sa.refill(page) };
 
     sa.allocate(layout)?;
@@ -449,7 +473,7 @@ fn test_readme2() -> Result<(), AllocationError> {
 fn test_bug1() -> Result<(), AllocationError> {
     let _ = env_logger::try_init();
 
-    let mut mmap = MmapPageProvider::new();
+    let mut mmap = Pager::new();
     let page = mmap.allocate_page();
 
     let mut sa: SCAllocator<ObjectPage> = SCAllocator::new(8);
@@ -468,7 +492,7 @@ fn test_bug1() -> Result<(), AllocationError> {
 fn slabmalloc_allocate_deallocate(b: &mut Bencher) {
     let _ = env_logger::try_init();
 
-    let mut mmap = MmapPageProvider::new();
+    let mut mmap = Pager::new();
     let mut sa: SCAllocator<ObjectPage> = SCAllocator::new(8);
     let layout = Layout::from_size_align(8, 1).unwrap();
 
@@ -490,7 +514,7 @@ fn slabmalloc_allocate_deallocate(b: &mut Bencher) {
 fn slabmalloc_allocate_deallocate_big(b: &mut Bencher) {
     let _ = env_logger::try_init();
 
-    let mut mmap = MmapPageProvider::new();
+    let mut mmap = Pager::new();
     let mut sa: SCAllocator<ObjectPage> = SCAllocator::new(512);
 
     let page = mmap.allocate_page();

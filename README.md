@@ -33,10 +33,16 @@ let object_size = 12;
 let alignment = 4;
 let layout = Layout::from_size_align(object_size, alignment).unwrap();
 
-let mut mmap = MmapPageProvider::new();
-let page = mmap.allocate_page().expect("Can't allocate a page");
+// We need something that can provide backing memory
+// (4 KiB and 2 MiB pages) to our ZoneAllocator
+// (see tests.rs for a dummy implementation).
+let mut pager = Pager::new();
+let page = pager.allocate_page().expect("Can't allocate a page");
 
 let mut zone: ZoneAllocator = Default::default();
+// Prematurely fill the ZoneAllocator with memory.
+// Alternatively, the allocate call would return an
+// error which we can capture to refill on-demand.
 unsafe { zone.refill(layout, page)? };
 
 let allocated = zone.allocate(layout)?;
@@ -49,10 +55,16 @@ let object_size = 10;
 let alignment = 8;
 let layout = Layout::from_size_align(object_size, alignment).unwrap();
 
-let mut mmap = MmapPageProvider::new();
-let page = mmap.allocate_page().expect("Can't allocate a page");
+// We need something that can provide backing memory
+// (4 KiB and 2 MiB pages) to our ZoneAllocator
+// (see tests.rs for a dummy implementation).
+let mut pager = Pager::new();
+let page = pager.allocate_page().expect("Can't allocate a page");
 
-let mut sa: SCAllocator = SCAllocator::new(object_size);
+let mut sa: SCAllocator<ObjectPage> = SCAllocator::new(object_size);
+// Prematurely fill the SCAllocator with memory.
+// Alternatively, the allocate call would return an
+// error which we can capture to refill on-demand.
 unsafe { sa.refill(page) };
 
 sa.allocate(layout)?;

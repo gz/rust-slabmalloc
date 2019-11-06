@@ -13,7 +13,14 @@
 #![allow(unused_features)]
 #![cfg_attr(
     test,
-    feature(prelude_import, test, raw, libc, c_void_variant, core_intrinsics)
+    feature(
+        prelude_import,
+        test,
+        raw,
+        c_void_variant,
+        core_intrinsics,
+        vec_remove_item
+    )
 )]
 #![no_std]
 #![crate_name = "slabmalloc"]
@@ -193,7 +200,7 @@ impl<'a> ZoneAllocator<'a> {
     ) -> Result<(), AllocationError> {
         match ZoneAllocator::get_slab(layout.size()) {
             Slab::Base(idx) => {
-                self.small_slabs[idx].insert_empty(new_page);
+                self.small_slabs[idx].refill(new_page);
                 Ok(())
             }
             Slab::Large(_idx) => Err(AllocationError::InvalidLayout),
@@ -213,7 +220,7 @@ impl<'a> ZoneAllocator<'a> {
         match ZoneAllocator::get_slab(layout.size()) {
             Slab::Base(_idx) => Err(AllocationError::InvalidLayout),
             Slab::Large(idx) => {
-                self.big_slabs[idx].insert_empty(new_page);
+                self.big_slabs[idx].refill(new_page);
                 Ok(())
             }
             Slab::Unsupported => Err(AllocationError::InvalidLayout),
