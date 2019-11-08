@@ -343,7 +343,16 @@ pub(crate) struct PageList<'a, T: AllocablePage> {
 }
 
 impl<'a, T: AllocablePage> PageList<'a, T> {
+    #[cfg(feature = "unstable")]
     pub(crate) const fn new() -> PageList<'a, T> {
+        PageList {
+            head: None,
+            elements: 0,
+        }
+    }
+
+    #[cfg(not(feature = "unstable"))]
+    pub(crate) fn new() -> PageList<'a, T> {
         PageList {
             head: None,
             elements: 0,

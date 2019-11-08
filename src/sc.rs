@@ -12,8 +12,15 @@ use crate::*;
 ///
 /// # Source
 /// https://stackoverflow.com/questions/53619695/calculating-maximum-value-of-a-set-of-constant-expressions-at-compile-time
+#[cfg(feature = "unstable")]
 const fn cmin(a: usize, b: usize) -> usize {
     [a, b][(a > b) as usize]
+}
+
+/// The boring variant of min (not const).
+#[cfg(not(feature = "unstable"))]
+fn cmin(a: usize, b: usize) -> usize {
+    core::cmp::min(a, b)
 }
 
 /// A slab allocator allocates elements of a fixed size.
@@ -66,7 +73,13 @@ macro_rules! new_sc_allocator {
 
 impl<'a, P: AllocablePage> SCAllocator<'a, P> {
     /// Create a new SCAllocator.
+    #[cfg(feature = "unstable")]
     pub const fn new(size: usize) -> SCAllocator<'a, P> {
+        new_sc_allocator!(size)
+    }
+
+    #[cfg(not(feature = "unstable"))]
+    pub fn new(size: usize) -> SCAllocator<'a, P> {
         new_sc_allocator!(size)
     }
 

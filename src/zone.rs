@@ -77,7 +77,13 @@ impl<'a> ZoneAllocator<'a> {
     /// How many allocators of type SCAllocator<LargeObjectPage> we have.
     const MAX_LARGE_SIZE_CLASSES: usize = 5;
 
+    #[cfg(feature = "unstable")]
     pub const fn new() -> ZoneAllocator<'a> {
+        new_zone!()
+    }
+
+    #[cfg(not(feature = "unstable"))]
+    pub fn new() -> ZoneAllocator<'a> {
         new_zone!()
     }
 

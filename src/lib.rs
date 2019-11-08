@@ -66,11 +66,13 @@
 //!         match layout.size() {
 //!             BASE_PAGE_SIZE => {
 //!                 // Best to use the underlying backend directly to allocate pages
+//!                 // to avoid fragmentation
 //!                 // PAGER.allocate_page()
 //!                 ptr::null_mut()
 //!             }
 //!             LARGE_PAGE_SIZE => {
 //!                 // Best to use the underlying backend directly to allocate large
+//!                 // to avoid fragmentation
 //!                 // PAGER.allocate_large_page()
 //!                 ptr::null_mut()
 //!             }
@@ -79,7 +81,7 @@
 //!                 match zone_allocator.allocate(layout) {
 //!                     Ok(nptr) => nptr.as_ptr(),
 //!                     Err(AllocationError::OutOfMemory(l)) => {
-//!                         if l.size() > BASE_PAGE_SIZE {
+//!                         if l.size() <= ZoneAllocator::MAX_BASE_ALLOC_SIZE {
 //!                             PAGER.allocate_page().map_or(ptr::null_mut(), |page| {
 //!                                 zone_allocator.refill(l, page).expect("Could not refill?");
 //!                                 zone_allocator
@@ -88,6 +90,7 @@
 //!                                     .as_ptr()
 //!                             })
 //!                         } else {
+//!                             // l.size() <= ZoneAllocator::MAX_ALLOC_SIZE
 //!                             PAGER
 //!                                 .allocate_large_page()
 //!                                 .map_or(ptr::null_mut(), |large_page| {
@@ -134,7 +137,6 @@
 //!     }
 //! }
 //! ```
-
 #![allow(unused_features)]
 #![cfg_attr(feature = "unstable", feature(const_fn))]
 #![cfg_attr(
