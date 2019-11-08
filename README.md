@@ -18,8 +18,8 @@ slabmalloc = ...
 ```
 
 Due to the use of [`const_fn`](https://github.com/rust-lang/rust/issues/57563),
-if you use the library with a stable rustc the `unstable` of slabmalloc feature
-needs to be disabled:
+if you use the library with a stable rustc the `unstable` feature needs to be
+disabled:
 
 ```
 slabmalloc = { version = ..., default_features = false }
