@@ -86,3 +86,36 @@ test tests::slabmalloc_allocate_deallocate_big ... bench:          38 ns/iter (+
 
 ## Documentation
 * [API Documentation](https://docs.rs/slabmalloc)
+
+## On Naming
+
+We call our allocator slabmalloc; however the name can be confusing as
+slabmalloc differs a bit from the seminal paper by Jeff Bonwick describing the
+"slab allocator". slabmalloc really is just a malloc implementation with size
+classes and different allocators per class (a segregated-storage allocator),
+while incorporating some of the simple and effective ideas from slab
+allocation.
+
+Some notable differences for folks familiar with the slab allocator:
+
+* The slab allocator constructor asks for an object constructor and destructor
+function to initialize/deinitialize objects. slabmalloc is more malloc-like;
+it just deals with memory, not object caching.
+
+* A slab in the slab allocator consists of one or more pages of virtually
+contiguous memory, carved up into equal-size chunks, with a reference count
+indicating how many of those chunks have been allocated. Instead, slabmalloc
+uses a (cache-line sized) bitmap to track objects within a slab. Similarly, the
+slab allocator builds a linked-list of free objects, whereas slabmalloc scans the
+bitmap in a slab to find a free slot.
+
+* For large objects, the slab allocator does not embed meta-data within the
+slab page. For example, you can fit only one 2 KiB buffer on a 4 KiB page
+because of the embedded slab data. Moreover, with large (multi-page) slabs it
+can not determine the slab data address from the buffer address. So a separate,
+per-cache hash-table is used to map objects to meta-data. In slabmalloc,
+the meta-data is always at the end of the page. It uses different slab sizes to
+ensure bigger objects are not allocated on small slab-pages. The problem of
+determining the slab base address is alleviated in rust as we also receive the
+object size on deallocations (we determine the size of the underlying slab by
+looking at the size of the object that is to be freed).
