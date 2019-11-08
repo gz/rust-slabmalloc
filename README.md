@@ -26,7 +26,7 @@ slabmalloc = { version = ..., default_features = false }
 
 ## Documentation
 * [API Documentation](https://docs.rs/slabmalloc)
-* [Examples](examples/global_alloc.rs)]
+* [Examples](examples/global_alloc.rs)
 
 ## API Usage
 
