@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::mem::{size_of, transmute};
 use std::prelude::v1::*;
 
-use super::*;
+use crate::*;
 use test::Bencher;
 
 /// A simple page allocator based on GlobalAlloc (for testing purposes).
