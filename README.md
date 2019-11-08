@@ -9,25 +9,32 @@ frames (or any other default page-size on non-x86 hardware).
 
 ## Build
 
-By default this library should compile with nightly and stable versions of the
+By default this library should compile using `cargo build` with nightly versions of the
 Rust compiler.
 
 Add the following line to the Cargo.toml dependencies:
 ```
-slabmalloc = <version>
+slabmalloc = ...
 ```
 
-## Usage
-
-The slabmalloc API is designed to satisfy the rust liballoc low-level memory
-allocation interface:
-
-```rust
-#[global_allocator]
-static MEM_PROVIDER: slabmalloc::SafeZoneAllocator = slabmalloc::SafeZoneAllocator::new();
+Due to the use of [`const_fn`](https://github.com/rust-lang/rust/issues/57563),
+to use it with a stable rustc, the `unstable` of slabmalloc feature needs to be
+disabled:
+```
+slabmalloc = { version = ..., default_features = false }
 ```
 
-* Use the ZoneAllocator to allocate arbitrary sized objects:
+## Documentation
+* [API Documentation](https://docs.rs/slabmalloc)
+* [Examples](examples/global_alloc.rs)]
+
+## API Usage
+
+slabmalloc has two main components described here. However, if you just want to
+implement a GlobalAlloc trait have a look at the
+[example](examples/global_alloc.rs)]. .
+
+It provides a ZoneAllocator to allocate arbitrary sized objects:
 ```rust
 let object_size = 12;
 let alignment = 4;
@@ -49,7 +56,7 @@ let allocated = zone.allocate(layout)?;
 zone.deallocate(allocated, layout)?;
 ```
 
-* Use the SCAllocator to allocate fixed sized objects:
+And a SCAllocator to allocate fixed sized objects:
 ```rust
 let object_size = 10;
 let alignment = 8;
@@ -83,18 +90,14 @@ test tests::jemalloc_allocate_deallocate_big   ... bench:         119 ns/iter (+
 test tests::slabmalloc_allocate_deallocate     ... bench:          38 ns/iter (+/- 8)
 test tests::slabmalloc_allocate_deallocate_big ... bench:          38 ns/iter (+/- 11)
 ```
-
-## Documentation
-* [API Documentation](https://docs.rs/slabmalloc)
-
 ## On Naming
 
 We call our allocator slabmalloc; however the name can be confusing as
-slabmalloc differs a bit from the seminal paper by Jeff Bonwick describing the
-"slab allocator". slabmalloc really is just a malloc implementation with size
-classes and different allocators per class (a segregated-storage allocator),
-while incorporating some of the simple and effective ideas from slab
-allocation.
+slabmalloc differs a bit from the [seminal paper by Jeff
+Bonwick](https://dl.acm.org/citation.cfm?id=1267263) describing the "slab
+allocator". slabmalloc really is just a malloc implementation with size classes
+and different allocators per class (a segregated-storage allocator), while
+incorporating some of the simple and effective ideas from slab allocation.
 
 Some notable differences for folks familiar with the slab allocator:
 
