@@ -32,8 +32,8 @@ slabmalloc = { version = ..., default_features = false }
 ## API Usage
 
 slabmalloc has two main components described here. However, if you just want to
-implement a GlobalAlloc trait have a look at the
-[example](examples/global_alloc.rs)]. .
+implement a GlobalAlloc trait have a look at the provided
+[example](examples/global_alloc.rs).
 
 It provides a ZoneAllocator to allocate arbitrary sized objects:
 ```rust
