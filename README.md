@@ -110,10 +110,10 @@ slab allocator builds a linked-list of free objects, whereas slabmalloc scans th
 bitmap in a slab to find a free slot.
 
 * For large objects, the slab allocator does not embed meta-data within the
-slab page. For example, you can fit only one 2 KiB buffer on a 4 KiB page
-because of the embedded slab data. Moreover, with large (multi-page) slabs it
-can not determine the slab data address from the buffer address. So a separate,
-per-cache hash-table is used to map objects to meta-data. In slabmalloc,
+slab page. Because, you could fit only one 2 KiB buffer on a 4 KiB page with
+the embedded slab data. Moreover, with large (multi-page) slabs it can not
+determine the slab data address from the buffer address. So a per-cache
+hash-table is used to map allocated objects to meta-data memory. In slabmalloc,
 the meta-data is always at the end of the page. It uses different slab sizes to
 ensure bigger objects are not allocated on small slab-pages. The problem of
 determining the slab base address is alleviated in rust as we also receive the
