@@ -105,22 +105,24 @@ unsafe impl GlobalAlloc for SafeZoneAllocator {
                 let mut zone_allocator = self.0.lock();
                 match zone_allocator.allocate(layout) {
                     Ok(nptr) => nptr.as_ptr(),
-                    Err(AllocationError::OutOfMemory(l)) => {
-                        if l.size() <= ZoneAllocator::MAX_BASE_ALLOC_SIZE {
+                    Err(AllocationError::OutOfMemory) => {
+                        if layout.size() <= ZoneAllocator::MAX_BASE_ALLOC_SIZE {
                             PAGER.allocate_page().map_or(ptr::null_mut(), |page| {
-                                zone_allocator.refill(l, page).expect("Could not refill?");
+                                zone_allocator
+                                    .refill(layout, page)
+                                    .expect("Could not refill?");
                                 zone_allocator
                                     .allocate(layout)
                                     .expect("Should succeed after refill")
                                     .as_ptr()
                             })
                         } else {
-                            // l.size() <= ZoneAllocator::MAX_ALLOC_SIZE
+                            // layout.size() <= ZoneAllocator::MAX_ALLOC_SIZE
                             PAGER
                                 .allocate_large_page()
                                 .map_or(ptr::null_mut(), |large_page| {
                                     zone_allocator
-                                        .refill_large(l, large_page)
+                                        .refill_large(layout, large_page)
                                         .expect("Could not refill?");
                                     zone_allocator
                                         .allocate(layout)

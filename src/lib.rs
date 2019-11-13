@@ -76,7 +76,7 @@ type VAddr = usize;
 pub enum AllocationError {
     /// Can't satisfy the allocation request for Layout because the allocator
     /// does not have enough memory (you may be able to `refill` it).
-    OutOfMemory(Layout),
+    OutOfMemory,
     /// Allocator can't deal with the provided size of the Layout.
     InvalidLayout,
 }

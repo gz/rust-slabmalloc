@@ -231,7 +231,7 @@ impl<'a, P: AllocablePage> SCAllocator<'a, P> {
             }
         };
 
-        let res = NonNull::new(ptr).ok_or(AllocationError::OutOfMemory(layout));
+        let res = NonNull::new(ptr).ok_or(AllocationError::OutOfMemory);
 
         if !ptr.is_null() {
             trace!(

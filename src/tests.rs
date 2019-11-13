@@ -179,7 +179,7 @@ macro_rules! test_sc_allocation {
                                 break;
                             }
                             // Couldn't allocate need to refill first
-                            Err(AllocationError::OutOfMemory(_l)) => {
+                            Err(AllocationError::OutOfMemory) => {
                                 let page = mmap.allocate_page().unwrap();
                                 unsafe {
                                     sa.refill(page);
@@ -233,7 +233,7 @@ macro_rules! test_sc_allocation {
                                 break;
                             }
                             // Couldn't allocate need to refill first
-                            Err(AllocationError::OutOfMemory(_)) => {
+                            Err(AllocationError::OutOfMemory) => {
                                 let page = mmap.allocate_page().unwrap();
                                 unsafe {
                                     sa.refill(page);
@@ -315,7 +315,7 @@ macro_rules! lop_allocation {
                                 break;
                             }
                             // Couldn't allocate need to refill first
-                            Err(AllocationError::OutOfMemory(_l)) => {
+                            Err(AllocationError::OutOfMemory) => {
                                 let page = mmap.allocate_large_page().unwrap();
                                 unsafe {
                                     sa.refill(page);
@@ -369,7 +369,7 @@ macro_rules! lop_allocation {
                                 break;
                             }
                             // Couldn't allocate need to refill first
-                            Err(AllocationError::OutOfMemory(_)) => {
+                            Err(AllocationError::OutOfMemory) => {
                                 let page = mmap.allocate_large_page().unwrap();
                                 unsafe {
                                     sa.refill(page);
