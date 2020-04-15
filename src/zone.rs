@@ -133,12 +133,37 @@ impl<'a> ZoneAllocator<'a> {
             _ => Slab::Unsupported,
         }
     }
+}
+
+unsafe impl<'a> crate::Allocator<'a> for ZoneAllocator<'a> {
+    /// Allocate a pointer to a block of memory described by `layout`.
+    fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocationError> {
+        match ZoneAllocator::get_slab(layout.size()) {
+            Slab::Base(idx) => self.small_slabs[idx].allocate(layout),
+            Slab::Large(idx) => self.big_slabs[idx].allocate(layout),
+            Slab::Unsupported => Err(AllocationError::InvalidLayout),
+        }
+    }
+
+    /// Deallocates a pointer to a block of memory, which was
+    /// previously allocated by `allocate`.
+    ///
+    /// # Arguments
+    ///  * `ptr` - Address of the memory location to free.
+    ///  * `layout` - Memory layout of the block pointed to by `ptr`.
+    fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
+        match ZoneAllocator::get_slab(layout.size()) {
+            Slab::Base(idx) => self.small_slabs[idx].deallocate(ptr, layout),
+            Slab::Large(idx) => self.big_slabs[idx].deallocate(ptr, layout),
+            Slab::Unsupported => Err(AllocationError::InvalidLayout),
+        }
+    }
 
     /// Refills the SCAllocator for a given Layout with an ObjectPage.
     ///
     /// # Safety
     /// ObjectPage needs to be emtpy etc.
-    pub unsafe fn refill(
+    unsafe fn refill(
         &mut self,
         layout: Layout,
         new_page: &'a mut ObjectPage<'a>,
@@ -157,7 +182,7 @@ impl<'a> ZoneAllocator<'a> {
     ///
     /// # Safety
     /// ObjectPage needs to be emtpy etc.
-    pub unsafe fn refill_large(
+    unsafe fn refill_large(
         &mut self,
         layout: Layout,
         new_page: &'a mut LargeObjectPage<'a>,
@@ -168,29 +193,6 @@ impl<'a> ZoneAllocator<'a> {
                 self.big_slabs[idx].refill(new_page);
                 Ok(())
             }
-            Slab::Unsupported => Err(AllocationError::InvalidLayout),
-        }
-    }
-
-    /// Allocate a pointer to a block of memory described by `layout`.
-    pub fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocationError> {
-        match ZoneAllocator::get_slab(layout.size()) {
-            Slab::Base(idx) => self.small_slabs[idx].allocate(layout),
-            Slab::Large(idx) => self.big_slabs[idx].allocate(layout),
-            Slab::Unsupported => Err(AllocationError::InvalidLayout),
-        }
-    }
-
-    /// Deallocates a pointer to a block of memory, which was
-    /// previously allocated by `allocate`.
-    ///
-    /// # Arguments
-    ///  * `ptr` - Address of the memory location to free.
-    ///  * `layout` - Memory layout of the block pointed to by `ptr`.
-    pub fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
-        match ZoneAllocator::get_slab(layout.size()) {
-            Slab::Base(idx) => self.small_slabs[idx].deallocate(ptr, layout),
-            Slab::Large(idx) => self.big_slabs[idx].deallocate(ptr, layout),
             Slab::Unsupported => Err(AllocationError::InvalidLayout),
         }
     }

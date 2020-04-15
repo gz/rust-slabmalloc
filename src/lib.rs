@@ -80,3 +80,18 @@ pub enum AllocationError {
     /// Allocator can't deal with the provided size of the Layout.
     InvalidLayout,
 }
+
+pub unsafe trait Allocator<'a> {
+    fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, AllocationError>;
+    fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError>;
+    unsafe fn refill_large(
+        &mut self,
+        layout: Layout,
+        new_page: &'a mut LargeObjectPage<'a>,
+    ) -> Result<(), AllocationError>;
+    unsafe fn refill(
+        &mut self,
+        layout: Layout,
+        new_page: &'a mut ObjectPage<'a>,
+    ) -> Result<(), AllocationError>;
+}
