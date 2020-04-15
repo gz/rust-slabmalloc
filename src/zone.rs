@@ -90,8 +90,7 @@ impl<'a> ZoneAllocator<'a> {
     /// Return maximum size an object of size `current_size` can use.
     ///
     /// Used to optimize `realloc`.
-    #[allow(dead_code)]
-    fn get_max_size(current_size: usize) -> Option<usize> {
+    pub fn get_max_size(current_size: usize) -> Option<usize> {
         match current_size {
             0..=8 => Some(8),
             9..=16 => Some(16),

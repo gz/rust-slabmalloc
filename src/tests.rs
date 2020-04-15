@@ -219,6 +219,7 @@ macro_rules! test_sc_allocation {
                 }
 
                 objects.clear();
+                sa.check_page_assignments();
 
                 // then allocate everything again,
                 for _ in 0..$allocations {
@@ -258,6 +259,7 @@ macro_rules! test_sc_allocation {
                 }
 
                 // Drain the slab-allocator and give unused pages back to the OS
+                sa.check_page_assignments();
                 while let Some(page) = sa.empty_slabs.pop() {
                     mmap.release_page(page);
                 }
@@ -355,6 +357,7 @@ macro_rules! lop_allocation {
                 }
 
                 objects.clear();
+                sa.check_page_assignments();
 
                 // then allocate everything again,
                 for _ in 0..$allocations {
@@ -394,6 +397,7 @@ macro_rules! lop_allocation {
                 }
 
                 // Drain the slab-allocator and give unused pages back to the OS
+                sa.check_page_assignments();
                 while let Some(page) = sa.empty_slabs.pop() {
                     mmap.release_large_page(page);
                 }

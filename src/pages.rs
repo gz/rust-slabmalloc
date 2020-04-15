@@ -1,4 +1,5 @@
 use crate::*;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 /// A trait defining bitfield operations we need for tracking allocated objects within a page.
 pub(crate) trait Bitfield {
@@ -10,14 +11,17 @@ pub(crate) trait Bitfield {
         page_size: usize,
     ) -> Option<(usize, usize)>;
     fn is_allocated(&self, idx: usize) -> bool;
-    fn set_bit(&mut self, idx: usize);
-    fn clear_bit(&mut self, idx: usize);
+    fn set_bit(&self, idx: usize);
+    fn clear_bit(&self, idx: usize);
     fn is_full(&self) -> bool;
     fn all_free(&self, relevant_bits: usize) -> bool;
 }
 
 /// Implementation of bit operations on u64 slices.
-impl Bitfield for [u64] {
+///
+/// We allow deallocations (i.e. clearning a bit in the field)
+/// from any thread. That's why the bitfield is a bunch of AtomicU64.
+impl Bitfield for [AtomicU64] {
     /// Initialize the bitfield
     ///
     /// # Arguments
@@ -29,7 +33,7 @@ impl Bitfield for [u64] {
     fn initialize(&mut self, for_size: usize, capacity: usize) {
         // Set everything to allocated
         for bitmap in self.iter_mut() {
-            *bitmap = u64::max_value();
+            *bitmap = AtomicU64::new(u64::max_value());
         }
 
         // Mark actual slots as free
@@ -51,7 +55,7 @@ impl Bitfield for [u64] {
         page_size: usize,
     ) -> Option<(usize, usize)> {
         for (base_idx, b) in self.iter().enumerate() {
-            let bitval = *b;
+            let bitval = b.load(Ordering::Relaxed);
             if bitval == u64::max_value() {
                 continue;
             } else {
@@ -82,23 +86,23 @@ impl Bitfield for [u64] {
     fn is_allocated(&self, idx: usize) -> bool {
         let base_idx = idx / 64;
         let bit_idx = idx % 64;
-        (self[base_idx] & (1 << bit_idx)) > 0
+        (self[base_idx].load(Ordering::Relaxed) & (1 << bit_idx)) > 0
     }
 
     /// Sets the bit number `idx` in the bit-field.
     #[inline(always)]
-    fn set_bit(&mut self, idx: usize) {
+    fn set_bit(&self, idx: usize) {
         let base_idx = idx / 64;
         let bit_idx = idx % 64;
-        self[base_idx] |= 1 << bit_idx;
+        self[base_idx].fetch_or(1 << bit_idx, Ordering::Relaxed);
     }
 
     /// Clears bit number `idx` in the bit-field.
     #[inline(always)]
-    fn clear_bit(&mut self, idx: usize) {
+    fn clear_bit(&self, idx: usize) {
         let base_idx = idx / 64;
         let bit_idx = idx % 64;
-        self[base_idx] &= !(1 << bit_idx);
+        self[base_idx].fetch_and(!(1 << bit_idx), Ordering::Relaxed);
     }
 
     /// Checks if we could allocate more objects of a given `alloc_size` within the
@@ -111,7 +115,10 @@ impl Bitfield for [u64] {
     /// than it would need to be in practice.
     #[inline(always)]
     fn is_full(&self) -> bool {
-        self.iter().filter(|&x| *x != u64::max_value()).count() == 0
+        self.iter()
+            .filter(|&x| x.load(Ordering::Relaxed) != u64::max_value())
+            .count()
+            == 0
     }
 
     /// Checks if the page has currently no allocations.
@@ -127,10 +134,10 @@ impl Bitfield for [u64] {
                 // the rest will be marked full
                 let bits_that_should_be_free = relevant_bits - checking_bit_range.0;
                 let free_mask = (1 << bits_that_should_be_free) - 1;
-                return (free_mask & *bitmap) == 0;
+                return (free_mask & bitmap.load(Ordering::Relaxed)) == 0;
             }
 
-            if *bitmap == 0 {
+            if bitmap.load(Ordering::Relaxed) == 0 {
                 continue;
             } else {
                 return false;
@@ -155,8 +162,8 @@ pub trait AllocablePage {
     /// We also assume that the address of the page will be aligned to `SIZE`.
     const SIZE: usize;
 
-    fn bitfield(&self) -> &[u64; 8];
-    fn bitfield_mut(&mut self) -> &mut [u64; 8];
+    fn bitfield(&self) -> &[AtomicU64; 8];
+    fn bitfield_mut(&mut self) -> &mut [AtomicU64; 8];
     fn prev(&mut self) -> &mut Rawlink<Self>
     where
         Self: core::marker::Sized;
@@ -176,7 +183,7 @@ pub trait AllocablePage {
     fn allocate(&mut self, layout: Layout) -> *mut u8 {
         match self.first_fit(layout) {
             Some((idx, addr)) => {
-                self.bitfield_mut().set_bit(idx);
+                self.bitfield().set_bit(idx);
                 addr as *mut u8
             }
             None => ptr::null_mut(),
@@ -194,7 +201,7 @@ pub trait AllocablePage {
     }
 
     /// Deallocates a memory object within this page.
-    fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
+    fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
         trace!(
             "AllocablePage deallocating ptr = {:p} with {:?}",
             ptr,
@@ -209,7 +216,7 @@ pub trait AllocablePage {
             ptr
         );
 
-        self.bitfield_mut().clear_bit(idx);
+        self.bitfield().clear_bit(idx);
         Ok(())
     }
 }
@@ -235,7 +242,7 @@ pub struct LargeObjectPage<'a> {
     prev: Rawlink<LargeObjectPage<'a>>,
 
     /// A bit-field to track free/allocated memory within `data`.
-    pub(crate) bitfield: [u64; 8],
+    pub(crate) bitfield: [AtomicU64; 8],
 }
 
 // These needs some more work to be really safe...
@@ -245,11 +252,11 @@ unsafe impl<'a> Sync for LargeObjectPage<'a> {}
 impl<'a> AllocablePage for LargeObjectPage<'a> {
     const SIZE: usize = LARGE_PAGE_SIZE;
 
-    fn bitfield(&self) -> &[u64; 8] {
+    fn bitfield(&self) -> &[AtomicU64; 8] {
         &self.bitfield
     }
 
-    fn bitfield_mut(&mut self) -> &mut [u64; 8] {
+    fn bitfield_mut(&mut self) -> &mut [AtomicU64; 8] {
         &mut self.bitfield
     }
 
@@ -296,7 +303,7 @@ pub struct ObjectPage<'a> {
     prev: Rawlink<ObjectPage<'a>>,
 
     /// A bit-field to track free/allocated memory within `data`.
-    pub(crate) bitfield: [u64; 8],
+    pub(crate) bitfield: [AtomicU64; 8],
 }
 
 // These needs some more work to be really safe...
@@ -306,10 +313,10 @@ unsafe impl<'a> Sync for ObjectPage<'a> {}
 impl<'a> AllocablePage for ObjectPage<'a> {
     const SIZE: usize = BASE_PAGE_SIZE;
 
-    fn bitfield(&self) -> &[u64; 8] {
+    fn bitfield(&self) -> &[AtomicU64; 8] {
         &self.bitfield
     }
-    fn bitfield_mut(&mut self) -> &mut [u64; 8] {
+    fn bitfield_mut(&mut self) -> &mut [AtomicU64; 8] {
         &mut self.bitfield
     }
 

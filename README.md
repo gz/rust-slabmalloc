@@ -6,14 +6,14 @@ libcore and is designed to be used in kernel level code as the only interface a
 client needs to provide is the necessary mechanism to allocate and free 4KiB
 frames (or any other default page-size on non-x86 hardware).
 
-
 ## Build
 
 By default this library should compile using `cargo build` with nightly versions of the
 Rust compiler.
 
 Add the following line to the Cargo.toml dependencies:
-```
+
+```cfg
 slabmalloc = ...
 ```
 
@@ -21,11 +21,12 @@ Due to the use of [`const_fn`](https://github.com/rust-lang/rust/issues/57563),
 if you use the library with a stable rustc the `unstable` feature needs to be
 disabled:
 
-```
+```cfg
 slabmalloc = { version = ..., default_features = false }
 ```
 
 ## Documentation
+
 * [API Documentation](https://docs.rs/slabmalloc)
 * [Examples](examples/global_alloc.rs)
 
@@ -36,6 +37,7 @@ implement a GlobalAlloc trait have a look at the provided
 [example](examples/global_alloc.rs).
 
 It provides a ZoneAllocator to allocate arbitrary sized objects:
+
 ```rust
 let object_size = 12;
 let alignment = 4;
@@ -58,6 +60,7 @@ zone.deallocate(allocated, layout)?;
 ```
 
 And a SCAllocator to allocate fixed sized objects:
+
 ```rust
 let object_size = 10;
 let alignment = 8;
@@ -80,17 +83,21 @@ sa.allocate(layout)?;
 
 ## Performance
 
-slabmalloc is optimized for single-threaded, fixed-size object allocations. For
-anything else it will probably perform poorly (for example if your workload
-does lots of reallocations, or if the allocator needs to scale to many cores).
+No real effort on optimizing or analyzing the performance as of yet. But if you
+insist, here are some silly, single-threaded benchmark numbers:
 
-At least on my system, it outperforms jemalloc in (silly) benchmarks:
+```log
+test tests::jemalloc_allocate_deallocate       ... bench:           6 ns/iter (+/- 0)
+test tests::jemalloc_allocate_deallocate_big   ... bench:           7 ns/iter (+/- 0)
+test tests::slabmalloc_allocate_deallocate     ... bench:          16 ns/iter (+/- 0)
+test tests::slabmalloc_allocate_deallocate_big ... bench:          16 ns/iter (+/- 1)
 ```
-test tests::jemalloc_allocate_deallocate       ... bench:          76 ns/iter (+/- 5)
-test tests::jemalloc_allocate_deallocate_big   ... bench:         119 ns/iter (+/- 24)
-test tests::slabmalloc_allocate_deallocate     ... bench:          38 ns/iter (+/- 8)
-test tests::slabmalloc_allocate_deallocate_big ... bench:          38 ns/iter (+/- 11)
-```
+
+For multiple threads it's beneficial to give every thread it's own instance of a
+ZoneAllocator. The `dealloc` can deal with deallocating any pointer
+on any any thread. The SMP design for that (atomic bitfield ops) is probably
+not that great of an idea compared to say, jemalloc's fully partitioned approach.
+
 ## On Naming
 
 We call our allocator slabmalloc; however the name can be confusing as
