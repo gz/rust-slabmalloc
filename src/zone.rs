@@ -14,18 +14,18 @@ macro_rules! new_zone {
             // TODO(perf): We should probably pick better classes
             // rather than powers-of-two (see SuperMalloc etc.)
             small_slabs: [
-                SCAllocator::new(1 << 3),  // 8
-                SCAllocator::new(1 << 4),  // 16
-                SCAllocator::new(1 << 5),  // 32
-                SCAllocator::new(1 << 6),  // 64
-                SCAllocator::new(1 << 7),  // 128
-                SCAllocator::new(1 << 8),  // 256
-                SCAllocator::new(1 << 9),  // 512
-                SCAllocator::new(1 << 10), // 1024 (TODO: maybe get rid of this class?)
-                SCAllocator::new(1 << 11), // 2048 (TODO: maybe get rid of this class?)
-                SCAllocator::new(4016), // 4016 (can't do 4096 because of metadata in ObjectPage)
+                SCAllocator::new(1 << 3), // 8
+                SCAllocator::new(1 << 4), // 16
+                SCAllocator::new(1 << 5), // 32
+                SCAllocator::new(1 << 6), // 64
+                SCAllocator::new(1 << 7), // 128
+                SCAllocator::new(1 << 8), // 256
             ],
             big_slabs: [
+                SCAllocator::new(1 << 9),  // 512
+                SCAllocator::new(1 << 10), // 1024
+                SCAllocator::new(1 << 11), // 2048
+                SCAllocator::new(1 << 12), // 4096
                 SCAllocator::new(1 << 13), // 8192
                 SCAllocator::new(1 << 14), // 16384
                 SCAllocator::new(1 << 15), // 32767
@@ -69,13 +69,13 @@ impl<'a> ZoneAllocator<'a> {
     /// Maximum size which is allocated with ObjectPages (4 KiB pages).
     ///
     /// e.g. this is 4 KiB - 80 bytes of meta-data.
-    pub const MAX_BASE_ALLOC_SIZE: usize = 4016;
+    pub const MAX_BASE_ALLOC_SIZE: usize = 256;
 
     /// How many allocators of type SCAllocator<ObjectPage> we have.
-    const MAX_BASE_SIZE_CLASSES: usize = 10;
+    const MAX_BASE_SIZE_CLASSES: usize = 6;
 
     /// How many allocators of type SCAllocator<LargeObjectPage> we have.
-    const MAX_LARGE_SIZE_CLASSES: usize = 5;
+    const MAX_LARGE_SIZE_CLASSES: usize = 9;
 
     #[cfg(feature = "unstable")]
     pub const fn new() -> ZoneAllocator<'a> {
@@ -101,8 +101,8 @@ impl<'a> ZoneAllocator<'a> {
             257..=512 => Some(512),
             513..=1024 => Some(1024),
             1025..=2048 => Some(2048),
-            2049..=4016 => Some(4016),
-            4017..=8192 => Some(8192),
+            2049..=4096 => Some(4016),
+            4097..=8192 => Some(8192),
             8193..=16384 => Some(16384),
             16385..=32767 => Some(32767),
             32768..=65536 => Some(65536),
@@ -120,15 +120,15 @@ impl<'a> ZoneAllocator<'a> {
             33..=64 => Slab::Base(3),
             65..=128 => Slab::Base(4),
             129..=256 => Slab::Base(5),
-            257..=512 => Slab::Base(6),
-            513..=1024 => Slab::Base(7),
-            1025..=2048 => Slab::Base(8),
-            2049..=4016 => Slab::Base(9),
-            4017..=8192 => Slab::Large(0),
-            8193..=16384 => Slab::Large(1),
-            16385..=32767 => Slab::Large(2),
-            32768..=65536 => Slab::Large(3),
-            65537..=131_072 => Slab::Large(4),
+            257..=512 => Slab::Large(0),
+            513..=1024 => Slab::Large(1),
+            1025..=2048 => Slab::Large(2),
+            2049..=4096 => Slab::Large(3),
+            4097..=8192 => Slab::Large(4),
+            8193..=16384 => Slab::Large(5),
+            16385..=32767 => Slab::Large(6),
+            32768..=65536 => Slab::Large(7),
+            65537..=131_072 => Slab::Large(8),
             _ => Slab::Unsupported,
         }
     }
