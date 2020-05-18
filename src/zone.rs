@@ -67,9 +67,7 @@ impl<'a> ZoneAllocator<'a> {
     pub const MAX_ALLOC_SIZE: usize = 1 << 17;
 
     /// Maximum size which is allocated with ObjectPages (4 KiB pages).
-    ///
-    /// e.g. this is 4 KiB - 80 bytes of meta-data.
-    pub const MAX_BASE_ALLOC_SIZE: usize = 256;
+    pub const MAX_BASE_ALLOC_SIZE: usize = 0;
 
     /// How many allocators of type SCAllocator<ObjectPage> we have.
     const MAX_BASE_SIZE_CLASSES: usize = 6;
@@ -114,12 +112,12 @@ impl<'a> ZoneAllocator<'a> {
     /// Figure out index into zone array to get the correct slab allocator for that size.
     fn get_slab(requested_size: usize) -> Slab {
         match requested_size {
-            0..=8 => Slab::Base(0),
-            9..=16 => Slab::Base(1),
-            17..=32 => Slab::Base(2),
-            33..=64 => Slab::Base(3),
-            65..=128 => Slab::Base(4),
-            129..=256 => Slab::Base(5),
+            0..=8 => Slab::Large(0),
+            9..=16 => Slab::Large(1),
+            17..=32 => Slab::Large(2),
+            33..=64 => Slab::Large(3),
+            65..=128 => Slab::Large(4),
+            129..=256 => Slab::Large(5),
             257..=512 => Slab::Large(0),
             513..=1024 => Slab::Large(1),
             1025..=2048 => Slab::Large(2),
