@@ -681,3 +681,29 @@ pub fn check_is_full_512() {
     }
     assert!(page.is_full());
 }
+
+// Test for bug that reports pages not as full when
+// the entire bitfield wasn't allocated.
+#[test]
+pub fn check_allocate_8192() {
+    let _r = env_logger::try_init();
+    let mut mmap = Pager::new();
+
+    match mmap.allocate_large_page() {
+        Some(lp) => {
+            lp.bitfield.initialize(8192, LARGE_PAGE_SIZE - 80);
+            assert!(!lp.is_full(), "Got empty slab");
+            let obj_per_page = core::cmp::min((LARGE_PAGE_SIZE - 80) / 8192, 6 * 64);
+            assert!(lp.is_empty(obj_per_page), "Got empty slab");
+            unsafe {
+                for _i in 0..255 {
+                    let ptr = lp.allocate(Layout::from_size_align_unchecked(8192, 4096));
+                    assert!(ptr != ptr::null_mut());
+                }
+            }
+
+            mmap.release_large_page(lp)
+        }
+        None => panic!("failed to allocate LargeObjectPage"),
+    }
+}

@@ -13,15 +13,14 @@ macro_rules! new_zone {
         ZoneAllocator {
             // TODO(perf): We should probably pick better classes
             // rather than powers-of-two (see SuperMalloc etc.)
-            small_slabs: [
-                SCAllocator::new(1 << 3), // 8
-                SCAllocator::new(1 << 4), // 16
-                SCAllocator::new(1 << 5), // 32
-                SCAllocator::new(1 << 6), // 64
-                SCAllocator::new(1 << 7), // 128
-                SCAllocator::new(1 << 8), // 256
-            ],
+            small_slabs: [],
             big_slabs: [
+                SCAllocator::new(1 << 3),  // 8
+                SCAllocator::new(1 << 4),  // 16
+                SCAllocator::new(1 << 5),  // 32
+                SCAllocator::new(1 << 6),  // 64
+                SCAllocator::new(1 << 7),  // 128
+                SCAllocator::new(1 << 8),  // 256
                 SCAllocator::new(1 << 9),  // 512
                 SCAllocator::new(1 << 10), // 1024
                 SCAllocator::new(1 << 11), // 2048
@@ -70,10 +69,10 @@ impl<'a> ZoneAllocator<'a> {
     pub const MAX_BASE_ALLOC_SIZE: usize = 0;
 
     /// How many allocators of type SCAllocator<ObjectPage> we have.
-    const MAX_BASE_SIZE_CLASSES: usize = 6;
+    const MAX_BASE_SIZE_CLASSES: usize = 0;
 
     /// How many allocators of type SCAllocator<LargeObjectPage> we have.
-    const MAX_LARGE_SIZE_CLASSES: usize = 9;
+    const MAX_LARGE_SIZE_CLASSES: usize = 15;
 
     #[cfg(feature = "unstable")]
     pub const fn new() -> ZoneAllocator<'a> {
@@ -118,15 +117,15 @@ impl<'a> ZoneAllocator<'a> {
             33..=64 => Slab::Large(3),
             65..=128 => Slab::Large(4),
             129..=256 => Slab::Large(5),
-            257..=512 => Slab::Large(0),
-            513..=1024 => Slab::Large(1),
-            1025..=2048 => Slab::Large(2),
-            2049..=4096 => Slab::Large(3),
-            4097..=8192 => Slab::Large(4),
-            8193..=16384 => Slab::Large(5),
-            16385..=32767 => Slab::Large(6),
-            32768..=65536 => Slab::Large(7),
-            65537..=131_072 => Slab::Large(8),
+            257..=512 => Slab::Large(6),
+            513..=1024 => Slab::Large(7),
+            1025..=2048 => Slab::Large(8),
+            2049..=4096 => Slab::Large(9),
+            4097..=8192 => Slab::Large(10),
+            8193..=16384 => Slab::Large(11),
+            16385..=32767 => Slab::Large(12),
+            32768..=65536 => Slab::Large(13),
+            65537..=131_072 => Slab::Large(14),
             _ => Slab::Unsupported,
         }
     }
