@@ -202,8 +202,9 @@ impl<'a, P: AllocablePage> SCAllocator<'a, P> {
         }
 
         // Periodically rebalance page-lists (since dealloc can't do it for us)
-        if self.allocation_count % SCAllocator::<P>::REBALANCE_COUNT == 0 {
+        if self.allocation_count > SCAllocator::<P>::REBALANCE_COUNT {
             self.check_page_assignments();
+            self.allocation_count = 0;
         }
 
         ptr::null_mut()
