@@ -75,7 +75,7 @@ macro_rules! new_sc_allocator {
 }
 
 impl<'a, P: AllocablePage> SCAllocator<'a, P> {
-    const REBALANCE_COUNT: usize = 10_000;
+    const REBALANCE_COUNT: usize = 64;
 
     /// Create a new SCAllocator.
     #[cfg(feature = "unstable")]
