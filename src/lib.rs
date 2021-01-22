@@ -21,14 +21,7 @@
 #![cfg_attr(feature = "unstable", feature(const_fn, const_mut_refs))]
 #![cfg_attr(
     test,
-    feature(
-        prelude_import,
-        test,
-        raw,
-        c_void_variant,
-        core_intrinsics,
-        vec_remove_item
-    )
+    feature(prelude_import, test, raw, c_void_variant, core_intrinsics)
 )]
 #![no_std]
 #![crate_name = "slabmalloc"]
