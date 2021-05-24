@@ -27,7 +27,8 @@
         raw,
         c_void_variant,
         core_intrinsics,
-        vec_remove_item
+        vec_remove_item,
+        const_mut_refs
     )
 )]
 #![no_std]
