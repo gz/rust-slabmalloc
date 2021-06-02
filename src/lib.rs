@@ -18,7 +18,7 @@
 //! # Implementing GlobalAlloc
 //! See the [global alloc](https://github.com/gz/rust-slabmalloc/tree/master/examples/global_alloc.rs) example.
 #![allow(unused_features)]
-#![cfg_attr(feature = "unstable", feature(const_fn, const_mut_refs))]
+#![cfg_attr(feature = "unstable", feature(const_fn_trait_bound, const_mut_refs))]
 #![cfg_attr(
     test,
     feature(prelude_import, test, raw, c_void_variant, core_intrinsics)
