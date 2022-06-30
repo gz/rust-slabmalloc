@@ -681,3 +681,61 @@ pub fn check_is_full_512() {
     }
     assert!(page.is_full());
 }
+
+#[test]
+pub fn issue_9() -> Result<(), AllocationError> {
+    let mut pager = Pager::new();
+    let mut zone: ZoneAllocator = Default::default();
+
+    // size: 256 align: 1 | my pager gets called
+    let l1 = Layout::from_size_align(256, 1).unwrap();
+    assert!(zone.allocate(l1).is_err(), "my pager gets called");
+    let page = pager.allocate_page().expect("Can't allocate a page");
+    unsafe { zone.refill(l1, page)? };
+    let p1 = zone.allocate(l1)?;
+
+    // size: 48 align: 8 | my pager gets called
+    let l2 = Layout::from_size_align(48, 8).unwrap();
+    assert!(zone.allocate(l2).is_err(), "my pager gets called");
+    let page = pager.allocate_page().expect("Can't allocate a page");
+    unsafe { zone.refill(l2, page)? };
+    let p2 = zone.allocate(l2)?;
+    assert_eq!(p2.as_ptr() as usize % l2.align(), 0);
+    assert_ne!(p2, p1);
+
+    // size: 6 align: 1 | my pager gets called and returns the properly aligned address X
+    let l3 = Layout::from_size_align(6, 1).unwrap();
+    assert!(
+        zone.allocate(l3).is_err(),
+        "my pager gets called and returns the properly aligned address X"
+    );
+    let page = pager.allocate_page().expect("Can't allocate a page");
+    unsafe { zone.refill(l3, page)? };
+    let p3 = zone.allocate(l3)?;
+    assert_eq!(p3.as_ptr() as usize % l3.align(), 0);
+    assert_ne!(p3, p2);
+    assert_ne!(p3, p1);
+
+    //size: 8 align: 1 | my pager doesn't get called
+    let l4 = Layout::from_size_align(8, 1).unwrap();
+    // my pager doesn't get called
+    let p4 = zone.allocate(l4)?;
+    assert_eq!(p4.as_ptr() as usize % l4.align(), 0);
+    assert_ne!(p4, p3);
+    assert_ne!(p4, p2);
+    assert_ne!(p4, p1);
+
+    // size: 16 align: 1 | my pager gets called
+    let l5 = Layout::from_size_align(16, 1).unwrap();
+    assert!(zone.allocate(l5).is_err(), "my pager gets called");
+    let page = pager.allocate_page().expect("Can't allocate a page");
+    unsafe { zone.refill(l5, page)? };
+    let p5 = zone.allocate(l5)?;
+    assert_eq!(p5.as_ptr() as usize % l5.align(), 0);
+    assert_ne!(p5, p1);
+    assert_ne!(p5, p2);
+    assert_ne!(p5, p3);
+    assert_ne!(p5, p4);
+
+    Ok(())
+}
