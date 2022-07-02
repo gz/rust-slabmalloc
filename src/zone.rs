@@ -132,6 +132,44 @@ impl<'a> ZoneAllocator<'a> {
             _ => Slab::Unsupported,
         }
     }
+
+    /// Reclaims empty pages by calling `dealloc` on it and removing it from the
+    /// empty lists in the [`SCAllocator`].
+    ///
+    /// The `dealloc` function is called at most `reclaim_base_max` times for
+    /// base pages, and at most `reclaim_large_max` for large pages.
+    pub fn try_reclaim_base_pages<F>(&mut self, mut to_reclaim: usize, mut dealloc: F)
+    where
+        F: Fn(*mut ObjectPage),
+    {
+        for i in 0..ZoneAllocator::MAX_BASE_SIZE_CLASSES {
+            let slab = &mut self.small_slabs[i];
+            let just_reclaimed = slab.try_reclaim_pages(to_reclaim, &mut dealloc);
+            to_reclaim = to_reclaim.checked_sub(just_reclaimed).unwrap_or(0);
+            if to_reclaim == 0 {
+                break;
+            }
+        }
+    }
+
+    /// Reclaims empty pages by calling `dealloc` on it and removing it from the
+    /// empty lists in the [`SCAllocator`].
+    ///
+    /// The `dealloc` function is called at most `reclaim_base_max` times for
+    /// base pages, and at most `reclaim_large_max` for large pages.
+    pub fn try_reclaim_large_pages<F>(&mut self, mut to_reclaim: usize, mut dealloc: F)
+    where
+        F: FnMut(*mut LargeObjectPage),
+    {
+        for i in 0..ZoneAllocator::MAX_LARGE_SIZE_CLASSES {
+            let slab = &mut self.big_slabs[i];
+            let just_reclaimed = slab.try_reclaim_pages(to_reclaim, &mut dealloc);
+            to_reclaim = to_reclaim.checked_sub(just_reclaimed).unwrap_or(0);
+            if to_reclaim == 0 {
+                break;
+            }
+        }
+    }
 }
 
 unsafe impl<'a> crate::Allocator<'a> for ZoneAllocator<'a> {

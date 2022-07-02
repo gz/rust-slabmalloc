@@ -210,6 +210,24 @@ impl<'a, P: AllocablePage> SCAllocator<'a, P> {
         ptr::null_mut()
     }
 
+    pub fn try_reclaim_pages<F>(&mut self, to_reclaim: usize, dealloc: &mut F) -> usize
+    where
+        F: FnMut(*mut P),
+    {
+        self.check_page_assignments();
+        let mut reclaimed = 0;
+        while reclaimed < to_reclaim {
+            if let Some(page) = self.empty_slabs.pop() {
+                dealloc(page as *mut P);
+                reclaimed += 1;
+            } else {
+                break;
+            }
+        }
+
+        reclaimed
+    }
+
     /// Refill the SCAllocator
     ///
     /// # Safety

@@ -259,10 +259,9 @@ macro_rules! test_sc_allocation {
                 }
 
                 // Drain the slab-allocator and give unused pages back to the OS
-                sa.check_page_assignments();
-                while let Some(page) = sa.empty_slabs.pop() {
-                    mmap.release_page(page);
-                }
+                sa.try_reclaim_pages(usize::MAX, &mut |p: *mut ObjectPage| unsafe {
+                    mmap.release_page(&mut *p)
+                });
             }
 
             // Check that we released everything to our page allocator:
