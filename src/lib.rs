@@ -24,10 +24,21 @@
 #![crate_name = "slabmalloc"]
 #![crate_type = "lib"]
 
+// The x86-64 platform specific code.
+#[cfg(all(target_arch = "x86_64"))]
+#[path = "arch/x86/mod.rs"]
+pub mod arch;
+
+// The aarch64 platform specific code.
+#[cfg(all(target_arch = "aarch64"))]
+#[path = "arch/aarch64/mod.rs"]
+pub mod arch;
+
 mod pages;
 mod sc;
 mod zone;
 
+pub use arch::*;
 pub use pages::*;
 pub use sc::*;
 pub use zone::*;
@@ -47,19 +58,6 @@ use core::mem;
 use core::ptr::{self, NonNull};
 
 use log::trace;
-
-#[cfg(target_arch = "x86_64")]
-const CACHE_LINE_SIZE: usize = 64;
-
-#[cfg(target_arch = "x86_64")]
-const BASE_PAGE_SIZE: usize = 4096;
-
-#[cfg(target_arch = "x86_64")]
-#[allow(unused)]
-const LARGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
-
-#[cfg(target_arch = "x86_64")]
-type VAddr = usize;
 
 /// Error that can be returned for `allocation` and `deallocation` requests.
 #[derive(Debug)]

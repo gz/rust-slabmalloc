@@ -14,7 +14,13 @@ keywords = ["os", "malloc", "slab", "alloc", "memory"]
 
 [features]
 unstable = []
-default = [ "unstable" ]
+default = [ "unstable", "cacheline_64", "aarch64_granule_4k" ]
+cacheline_32 = []
+cacheline_64 = []
+cacheline_128 = []
+aarch64_granule_4k = []
+aarch64_granule_16k = []
+aarch64_granule_64k = []
 
 [dependencies]
 log = "0.4"
