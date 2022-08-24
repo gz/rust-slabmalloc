@@ -65,7 +65,8 @@ impl Bitfield for [AtomicU64] {
                 let offset = idx * layout.size();
 
                 // TODO(bad): psize needs to be passed as arg
-                let offset_inside_data_area = offset <= (page_size - 80 - layout.size());
+                let offset_inside_data_area =
+                    offset <= (page_size - OBJECT_PAGE_METADATA_OVERHEAD - layout.size());
                 if !offset_inside_data_area {
                     return None;
                 }
@@ -173,7 +174,7 @@ pub trait AllocablePage {
 
     /// Tries to find a free block within `data` that satisfies `alignment` requirement.
     fn first_fit(&self, layout: Layout) -> Option<(usize, usize)> {
-        let base_addr = (&*self as *const Self as *const u8) as usize;
+        let base_addr = (self as *const Self as *const u8) as usize;
         self.bitfield().first_fit(base_addr, layout, Self::SIZE)
     }
 
@@ -235,7 +236,7 @@ pub trait AllocablePage {
 pub struct LargeObjectPage<'a> {
     /// Holds memory objects.
     #[allow(dead_code)]
-    data: [u8; (2 * 1024 * 1024) - 80],
+    data: [u8; LARGE_OBJECT_PAGE_SIZE - OBJECT_PAGE_METADATA_OVERHEAD],
 
     /// Next element in list (used by `PageList`).
     next: Rawlink<LargeObjectPage<'a>>,
@@ -250,7 +251,7 @@ unsafe impl<'a> Send for LargeObjectPage<'a> {}
 unsafe impl<'a> Sync for LargeObjectPage<'a> {}
 
 impl<'a> AllocablePage for LargeObjectPage<'a> {
-    const SIZE: usize = LARGE_PAGE_SIZE;
+    const SIZE: usize = LARGE_OBJECT_PAGE_SIZE;
 
     fn bitfield(&self) -> &[AtomicU64; 8] {
         &self.bitfield
@@ -295,7 +296,7 @@ impl<'a> fmt::Debug for LargeObjectPage<'a> {
 pub struct ObjectPage<'a> {
     /// Holds memory objects.
     #[allow(dead_code)]
-    data: [u8; 4096 - 80],
+    data: [u8; OBJECT_PAGE_SIZE - OBJECT_PAGE_METADATA_OVERHEAD],
 
     /// Next element in list (used by `PageList`).
     next: Rawlink<ObjectPage<'a>>,
@@ -311,7 +312,7 @@ unsafe impl<'a> Send for ObjectPage<'a> {}
 unsafe impl<'a> Sync for ObjectPage<'a> {}
 
 impl<'a> AllocablePage for ObjectPage<'a> {
-    const SIZE: usize = BASE_PAGE_SIZE;
+    const SIZE: usize = OBJECT_PAGE_SIZE;
 
     fn bitfield(&self) -> &[AtomicU64; 8] {
         &self.bitfield
@@ -452,7 +453,7 @@ impl<'a, T: AllocablePage> PageList<'a, T> {
     /// Does the list contain `s`?
     pub(crate) fn contains(&mut self, s: *const T) -> bool {
         for slab_page in self.iter_mut() {
-            if slab_page as *const T == s as *const T {
+            if core::ptr::eq(slab_page, s) {
                 return true;
             }
         }

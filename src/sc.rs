@@ -66,7 +66,7 @@ macro_rules! new_sc_allocator {
         SCAllocator {
             size: $size,
             allocation_count: 0,
-            obj_per_page: cmin((P::SIZE - 80) / $size, 8 * 64),
+            obj_per_page: cmin((P::SIZE - OBJECT_PAGE_METADATA_OVERHEAD) / $size, 8 * 64),
             empty_slabs: PageList::new(),
             slabs: PageList::new(),
             full_slabs: PageList::new(),
@@ -233,7 +233,8 @@ impl<'a, P: AllocablePage> SCAllocator<'a, P> {
     /// # Safety
     /// ObjectPage needs to be empty etc.
     pub unsafe fn refill(&mut self, page: &'a mut P) {
-        page.bitfield_mut().initialize(self.size, P::SIZE - 80);
+        page.bitfield_mut()
+            .initialize(self.size, P::SIZE - OBJECT_PAGE_METADATA_OVERHEAD);
         *page.prev() = Rawlink::none();
         *page.next() = Rawlink::none();
         trace!("adding page to SCAllocator {:p}", page);
@@ -254,7 +255,7 @@ impl<'a, P: AllocablePage> SCAllocator<'a, P> {
             layout
         );
         assert!(layout.size() <= self.size);
-        assert!(self.size <= (P::SIZE - CACHE_LINE_SIZE));
+        assert!(self.size <= (P::SIZE - OBJECT_PAGE_METADATA_OVERHEAD));
         let new_layout = unsafe { Layout::from_size_align_unchecked(self.size, layout.align()) };
         assert!(new_layout.size() >= layout.size());
 
@@ -303,7 +304,7 @@ impl<'a, P: AllocablePage> SCAllocator<'a, P> {
     /// or full -> partial lists.
     pub fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) -> Result<(), AllocationError> {
         assert!(layout.size() <= self.size);
-        assert!(self.size <= (P::SIZE - CACHE_LINE_SIZE));
+        assert!(self.size <= (P::SIZE - OBJECT_PAGE_METADATA_OVERHEAD));
         trace!(
             "SCAllocator({}) is trying to deallocate ptr = {:p} layout={:?} P.size= {}",
             self.size,

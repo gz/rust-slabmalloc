@@ -145,7 +145,7 @@ impl<'a> ZoneAllocator<'a> {
         for i in 0..ZoneAllocator::MAX_BASE_SIZE_CLASSES {
             let slab = &mut self.small_slabs[i];
             let just_reclaimed = slab.try_reclaim_pages(to_reclaim, &mut dealloc);
-            to_reclaim = to_reclaim.checked_sub(just_reclaimed).unwrap_or(0);
+            to_reclaim = to_reclaim.saturating_sub(just_reclaimed);
             if to_reclaim == 0 {
                 break;
             }
@@ -164,7 +164,7 @@ impl<'a> ZoneAllocator<'a> {
         for i in 0..ZoneAllocator::MAX_LARGE_SIZE_CLASSES {
             let slab = &mut self.big_slabs[i];
             let just_reclaimed = slab.try_reclaim_pages(to_reclaim, &mut dealloc);
-            to_reclaim = to_reclaim.checked_sub(just_reclaimed).unwrap_or(0);
+            to_reclaim = to_reclaim.saturating_sub(just_reclaimed);
             if to_reclaim == 0 {
                 break;
             }

@@ -38,8 +38,8 @@ impl Pager {
 
         if !r.is_null() {
             match page_size {
-                BASE_PAGE_SIZE => self.base_pages.insert(r),
-                LARGE_PAGE_SIZE => self.large_pages.insert(r),
+                OBJECT_PAGE_SIZE => self.base_pages.insert(r),
+                LARGE_OBJECT_PAGE_SIZE => self.large_pages.insert(r),
                 _ => unreachable!("invalid page-size supplied"),
             };
             Some(r)
@@ -50,21 +50,21 @@ impl Pager {
 
     fn dealloc_page(&mut self, ptr: *mut u8, page_size: usize) {
         let layout = match page_size {
-            BASE_PAGE_SIZE => {
+            OBJECT_PAGE_SIZE => {
                 assert!(
                     self.base_pages.contains(&ptr),
                     "Trying to deallocate invalid base-page"
                 );
                 self.base_pages.remove(&ptr);
-                Layout::from_size_align(BASE_PAGE_SIZE, BASE_PAGE_SIZE).unwrap()
+                Layout::from_size_align(OBJECT_PAGE_SIZE, OBJECT_PAGE_SIZE).unwrap()
             }
-            LARGE_PAGE_SIZE => {
+            LARGE_OBJECT_PAGE_SIZE => {
                 assert!(
                     self.large_pages.contains(&ptr),
                     "Trying to deallocate invalid large-page"
                 );
                 self.large_pages.remove(&ptr);
-                Layout::from_size_align(LARGE_PAGE_SIZE, LARGE_PAGE_SIZE).unwrap()
+                Layout::from_size_align(LARGE_OBJECT_PAGE_SIZE, LARGE_OBJECT_PAGE_SIZE).unwrap()
             }
             _ => unreachable!("invalid page-size supplied"),
         };
@@ -86,7 +86,7 @@ impl<'a> PageProvider<'a> for Pager {
     ///
     /// Uses `mmap` to map a page and casts it to a ObjectPage.
     fn allocate_page(&mut self) -> Option<&'a mut ObjectPage<'a>> {
-        self.alloc_page(BASE_PAGE_SIZE)
+        self.alloc_page(OBJECT_PAGE_SIZE)
             .map(|r| unsafe { transmute(r as usize) })
     }
 
@@ -94,14 +94,14 @@ impl<'a> PageProvider<'a> for Pager {
     ///
     /// Uses `munmap` to release the page back to the OS.
     fn release_page(&mut self, p: &'a mut ObjectPage<'a>) {
-        self.dealloc_page(p as *const ObjectPage as *mut u8, BASE_PAGE_SIZE);
+        self.dealloc_page(p as *const ObjectPage as *mut u8, OBJECT_PAGE_SIZE);
     }
 
     /// Allocates a new ObjectPage from the system.
     ///
     /// Uses `mmap` to map a page and casts it to a ObjectPage.
     fn allocate_large_page(&mut self) -> Option<&'a mut LargeObjectPage<'a>> {
-        self.alloc_page(LARGE_PAGE_SIZE)
+        self.alloc_page(LARGE_OBJECT_PAGE_SIZE)
             .map(|r| unsafe { transmute(r as usize) })
     }
 
@@ -109,20 +109,23 @@ impl<'a> PageProvider<'a> for Pager {
     ///
     /// Uses `munmap` to release the page back to the OS.
     fn release_large_page(&mut self, p: &'a mut LargeObjectPage<'a>) {
-        self.dealloc_page(p as *const LargeObjectPage as *mut u8, LARGE_PAGE_SIZE);
+        self.dealloc_page(
+            p as *const LargeObjectPage as *mut u8,
+            LARGE_OBJECT_PAGE_SIZE,
+        );
     }
 }
 
 #[test]
 fn check_size() {
     assert_eq!(
-        BASE_PAGE_SIZE as usize,
+        OBJECT_PAGE_SIZE as usize,
         size_of::<ObjectPage>(),
         "ObjectPage should be exactly the size of a single page."
     );
 
     assert_eq!(
-        LARGE_PAGE_SIZE as usize,
+        LARGE_OBJECT_PAGE_SIZE as usize,
         size_of::<LargeObjectPage>(),
         "LargeObjectPage should be exactly the size of a large-page."
     );
@@ -134,7 +137,7 @@ fn test_mmap_allocator() {
 
     match mmap.allocate_page() {
         Some(sp) => {
-            sp.bitfield.initialize(8, BASE_PAGE_SIZE - 80);
+            sp.bitfield.initialize(8, OBJECT_PAGE_SIZE - 80);
             assert!(!sp.is_full(), "Got empty slab");
             assert!(sp.is_empty(6 * 64), "Got empty slab");
             mmap.release_page(sp)
@@ -144,7 +147,7 @@ fn test_mmap_allocator() {
 
     match mmap.allocate_large_page() {
         Some(lp) => {
-            lp.bitfield.initialize(8, LARGE_PAGE_SIZE - 80);
+            lp.bitfield.initialize(8, LARGE_OBJECT_PAGE_SIZE - 80);
             assert!(!lp.is_full(), "Got empty slab");
             assert!(lp.is_empty(8 * 64), "Got empty slab");
             mmap.release_large_page(lp)
@@ -631,8 +634,8 @@ pub fn check_is_full_8() {
     let layout = Layout::from_size_align(8, 1).unwrap();
 
     let mut page: ObjectPage = Default::default();
-    page.bitfield.initialize(8, BASE_PAGE_SIZE - 80);
-    let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 80) / 8, 8 * 64);
+    page.bitfield.initialize(8, OBJECT_PAGE_SIZE - 80);
+    let obj_per_page = core::cmp::min((OBJECT_PAGE_SIZE - 80) / 8, 8 * 64);
 
     let mut allocs = 0;
     loop {
@@ -661,9 +664,9 @@ pub fn check_is_full_8() {
 pub fn check_is_full_512() {
     let _r = env_logger::try_init();
     let mut page: ObjectPage = Default::default();
-    page.bitfield.initialize(512, BASE_PAGE_SIZE - 80);
+    page.bitfield.initialize(512, OBJECT_PAGE_SIZE - 80);
     let layout = Layout::from_size_align(512, 1).unwrap();
-    let obj_per_page = core::cmp::min((BASE_PAGE_SIZE - 80) / 512, 6 * 64);
+    let obj_per_page = core::cmp::min((OBJECT_PAGE_SIZE - 80) / 512, 6 * 64);
 
     let mut allocs = 0;
     loop {
@@ -673,7 +676,7 @@ pub fn check_is_full_512() {
 
         allocs += 1;
 
-        if allocs < (BASE_PAGE_SIZE - 80) / 512 {
+        if allocs < (OBJECT_PAGE_SIZE - 80) / 512 {
             assert!(!page.is_full());
             assert!(!page.is_empty(obj_per_page));
         }
